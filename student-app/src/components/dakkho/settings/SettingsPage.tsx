@@ -49,7 +49,7 @@ function SettingItem({ icon: Icon, iconColor = 'text-sky-500', title, subtitle, 
 }
 
 export function SettingsPage() {
-  const { theme, toggleTheme } = useThemeStore();
+  const { theme, themeMode, toggleTheme } = useThemeStore();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigationStore((s) => s.navigate);
@@ -159,7 +159,7 @@ export function SettingsPage() {
               onClick={() => navigate('settings-theme')}
               rightElement={
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+                  <span className="text-xs text-muted-foreground">{themeMode === 'system' ? 'System' : theme === 'dark' ? 'Dark' : 'Light'}</span>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </div>
               }

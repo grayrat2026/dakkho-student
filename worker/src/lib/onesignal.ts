@@ -177,3 +177,54 @@ export async function unregisterPushToken(
     throw error;
   }
 }
+
+/**
+ * Check if a user should receive a specific type of notification
+ * based on their notification_preferences in D1.
+ * Returns { push: boolean, email: boolean } — defaults to true if no prefs found.
+ */
+export async function checkUserNotifPrefs(
+  env: Env,
+  userId: string,
+  notifType: string
+): Promise<{ push: boolean; email: boolean }> {
+  try {
+    const prefs = await env.DB.prepare(
+      'SELECT * FROM notification_preferences WHERE user_id = ?'
+    ).bind(userId).first() as any;
+
+    if (!prefs) {
+      // No preferences set → use defaults (push: true, email: true for most types)
+      return { push: true, email: true };
+    }
+
+    // Check master switches first
+    if (!prefs.push_enabled) return { push: false, email: !!prefs.email_enabled };
+    if (!prefs.email_enabled) return { push: !!prefs.push_enabled, email: false };
+
+    // Map notification type to per-category preference columns
+    const typeToColumn: Record<string, { push: string; email: string }> = {
+      'course-update': { push: 'course_updates_push', email: 'course_updates_email' },
+      'info': { push: 'course_updates_push', email: 'course_updates_email' },
+      'success': { push: 'course_updates_push', email: 'course_updates_email' },
+      'grades': { push: 'grades_push', email: 'grades_email' },
+      'schedule': { push: 'schedule_push', email: 'schedule_email' },
+      'payment': { push: 'payment_push', email: 'payment_email' },
+      'announcement': { push: 'promotions_push', email: 'promotions_email' },
+      'promotions': { push: 'promotions_push', email: 'promotions_email' },
+      'social': { push: 'social_push', email: 'social_email' },
+      'system': { push: 'system_push', email: 'system_email' },
+      'warning': { push: 'system_push', email: 'system_email' },
+      'error': { push: 'system_push', email: 'system_email' },
+    };
+
+    const mapping = typeToColumn[notifType] || typeToColumn['info'];
+    return {
+      push: !!prefs[mapping.push],
+      email: !!prefs[mapping.email],
+    };
+  } catch (error) {
+    // On error, default to allowing notifications
+    return { push: true, email: true };
+  }
+}

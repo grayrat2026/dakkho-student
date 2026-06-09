@@ -619,6 +619,45 @@ CREATE TABLE IF NOT EXISTS notification_sounds (
 );
 
 -- ============================================================
+-- USER PREFERENCES TABLE (theme, privacy, appearance, etc.)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id TEXT NOT NULL PRIMARY KEY,
+  -- Theme preferences
+  theme_mode TEXT DEFAULT 'system',
+  accent_color TEXT DEFAULT '#0ea5e9',
+  font_size INTEGER DEFAULT 16,
+  border_radius INTEGER DEFAULT 16,
+  compact_mode INTEGER DEFAULT 0,
+  -- Privacy preferences
+  profile_visibility TEXT DEFAULT 'Friends',
+  search_visible INTEGER DEFAULT 1,
+  show_email INTEGER DEFAULT 0,
+  show_phone INTEGER DEFAULT 0,
+  show_progress INTEGER DEFAULT 1,
+  activity_status INTEGER DEFAULT 1,
+  read_receipts INTEGER DEFAULT 1,
+  data_sharing INTEGER DEFAULT 0,
+  analytics_opt_out INTEGER DEFAULT 0,
+  personalized_recommendations INTEGER DEFAULT 1,
+  cookie_consent TEXT DEFAULT 'essential',
+  -- Content protection
+  content_protection_enabled INTEGER DEFAULT 1,
+  no_copy INTEGER DEFAULT 1,
+  no_right_click INTEGER DEFAULT 1,
+  no_screenshot INTEGER DEFAULT 0,
+  -- Download preferences
+  download_quality TEXT DEFAULT '720p',
+  wifi_only INTEGER DEFAULT 0,
+  -- Misc
+  language TEXT DEFAULT 'bn',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prefs_user ON user_preferences(user_id);
+
+-- ============================================================
 -- SEED DATA
 -- ============================================================
 

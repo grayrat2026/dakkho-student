@@ -356,6 +356,12 @@ export const studentSettingsApi = {
   update: (preferences: Record<string, unknown>) => apiPut<{ success: boolean }>('/api/student/settings', preferences),
 };
 
+// ─── User Preferences (Theme, Privacy, Appearance) ───
+export const userPreferencesApi = {
+  get: () => apiGet<{ preferences: Record<string, unknown> }>('/api/student/preferences'),
+  update: (preferences: Record<string, unknown>) => apiPut<{ success: boolean }>('/api/student/preferences', preferences),
+};
+
 // ─── Student Learning Stats ───
 export const learningStatsApi = {
   get: (range?: string) => {

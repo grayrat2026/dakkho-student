@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Eye, EyeOff, Lock, Globe, Shield, BarChart3, ChevronLeft,
@@ -63,7 +63,48 @@ export function PrivacySettingsPage() {
   const [readReceipts, setReadReceipts] = useState(true);
   const [saved, setSaved] = useState(false);
 
+  // Load privacy settings from D1 on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { userPreferencesApi } = await import('@/lib/api-client');
+        const result = await userPreferencesApi.get();
+        const prefs = result.preferences as Record<string, unknown>;
+        if (cancelled || !prefs) return;
+        if (prefs.profileVisibility) setProfileVisibility(prefs.profileVisibility as string);
+        if (prefs.searchVisible !== undefined) setSearchVisible(!!prefs.searchVisible);
+        if (prefs.showEmail !== undefined) setShowEmail(!!prefs.showEmail);
+        if (prefs.showPhone !== undefined) setShowPhone(!!prefs.showPhone);
+        if (prefs.showProgress !== undefined) setShowProgress(!!prefs.showProgress);
+        if (prefs.activityStatus !== undefined) setActivityStatus(!!prefs.activityStatus);
+        if (prefs.readReceipts !== undefined) setReadReceipts(!!prefs.readReceipts);
+        if (prefs.dataSharing !== undefined) setDataSharing(!!prefs.dataSharing);
+        if (prefs.analyticsOptOut !== undefined) setAnalyticsOptOut(!!prefs.analyticsOptOut);
+        if (prefs.personalizedRecommendations !== undefined) setPersonalizedAds(!!prefs.personalizedRecommendations);
+        if (prefs.cookieConsent) setCookieConsent(prefs.cookieConsent as string);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSave = async () => {
+    try {
+      const { userPreferencesApi } = await import('@/lib/api-client');
+      await userPreferencesApi.update({
+        profileVisibility,
+        searchVisible,
+        showEmail,
+        showPhone,
+        showProgress,
+        activityStatus,
+        readReceipts,
+        dataSharing,
+        analyticsOptOut,
+        personalizedRecommendations,
+        cookieConsent,
+      });
+    } catch {}
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };

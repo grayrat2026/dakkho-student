@@ -10,7 +10,7 @@ import type { AuthVariables } from '../lib/auth';
 import { adminAuthMiddleware } from '../lib/auth';
 import { logAudit } from '../lib/audit';
 import { getErrorMessage } from '../lib/utils';
-import { sendPushNotification, getUserPushTokens } from '../lib/onesignal';
+import { sendPushNotification, getUserPushTokens, checkUserNotifPrefs } from '../lib/onesignal';
 
 const notificationRoutes = new Hono<{ Bindings: Env; Variables: AuthVariables }>();
 
@@ -180,8 +180,10 @@ notificationRoutes.post('/', async (c) => {
     }
 
     // Send OneSignal push notification in addition to in-app
+    // Check user notification preferences before sending push
     try {
       if (targetAll) {
+        // For targetAll, we can't check individual prefs efficiently — send to all via segment
         await sendPushNotification(c.env, {
           title,
           message,
@@ -189,14 +191,18 @@ notificationRoutes.post('/', async (c) => {
           url: actionUrl || undefined,
         });
       } else if (targetUserId) {
-        const pushTokens = await getUserPushTokens(c.env, targetUserId);
-        if (pushTokens.length > 0) {
-          await sendPushNotification(c.env, {
-            title,
-            message,
-            targetPlayerIds: pushTokens,
-            url: actionUrl || undefined,
-          });
+        // Check individual user's notification preferences
+        const prefs = await checkUserNotifPrefs(c.env, targetUserId, type);
+        if (prefs.push) {
+          const pushTokens = await getUserPushTokens(c.env, targetUserId);
+          if (pushTokens.length > 0) {
+            await sendPushNotification(c.env, {
+              title,
+              message,
+              targetPlayerIds: pushTokens,
+              url: actionUrl || undefined,
+            });
+          }
         }
       } else if (targetInstitute) {
         await sendPushNotification(c.env, {

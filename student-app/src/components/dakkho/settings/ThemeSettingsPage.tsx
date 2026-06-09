@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Sun, Moon, Monitor, Palette, ChevronLeft, CheckCircle, Type,
@@ -24,15 +24,39 @@ const ACCENT_COLORS = [
 export function ThemeSettingsPage() {
   const { goBack } = useNavigationStore();
   const { theme, toggleTheme } = useThemeStore();
+  const themeModeFromStore = useThemeStore((s) => s.themeMode);
+  const setThemeModeDirect = useThemeStore((s) => s.setThemeMode);
   const user = useAuthStore((s) => s.user);
 
-  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>(theme === 'dark' ? 'dark' : 'light');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>(themeModeFromStore);
   const [accentColor, setAccentColor] = useState('Sky');
   const [fontSize, setFontSize] = useState(16);
   const [borderRadius, setBorderRadius] = useState(16);
   const [compactMode, setCompactMode] = useState(false);
   const [saved, setSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Load preferences from D1 on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { userPreferencesApi } = await import('@/lib/api-client');
+        const result = await userPreferencesApi.get();
+        const prefs = result.preferences as Record<string, unknown>;
+        if (cancelled || !prefs) return;
+        if (prefs.themeMode) setThemeMode(prefs.themeMode as 'light' | 'dark' | 'system');
+        if (prefs.accentColor) {
+          const match = ACCENT_COLORS.find(c => c.hex === prefs.accentColor);
+          if (match) setAccentColor(match.name);
+        }
+        if (prefs.fontSize) setFontSize(prefs.fontSize as number);
+        if (prefs.borderRadius) setBorderRadius(prefs.borderRadius as number);
+        if (prefs.compactMode !== undefined) setCompactMode(!!prefs.compactMode);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleThemeChange = (mode: 'light' | 'dark' | 'system') => {
     setThemeMode(mode);
@@ -48,20 +72,18 @@ export function ThemeSettingsPage() {
   };
 
   const handleSave = async () => {
-    if (!user?.id) { setSaved(true); setTimeout(() => setSaved(false), 3000); return; }
     setIsSaving(true);
     try {
-      await fetch('/api/user/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          themeMode,
-          accentColor: ACCENT_COLORS.find(c => c.name === accentColor)?.hex || '#0ea5e9',
-          fontSize,
-          compactMode,
-        }),
+      const { userPreferencesApi } = await import('@/lib/api-client');
+      await userPreferencesApi.update({
+        themeMode,
+        accentColor: ACCENT_COLORS.find(c => c.name === accentColor)?.hex || '#0ea5e9',
+        fontSize,
+        borderRadius,
+        compactMode,
       });
+      // Apply theme mode to store
+      setThemeModeDirect(themeMode);
     } catch {}
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);

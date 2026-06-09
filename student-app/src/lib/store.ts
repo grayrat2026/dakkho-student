@@ -496,18 +496,65 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // ============ THEME STORE ============
 interface ThemeState {
   theme: 'light' | 'dark';
+  themeMode: 'light' | 'dark' | 'system';
+  setThemeMode: (mode: 'light' | 'dark' | 'system') => void;
   toggleTheme: () => void;
+  loadFromPreferences: (mode: 'light' | 'dark' | 'system') => void;
 }
+
+const THEME_STORAGE_KEY = 'dakkho_theme_mode';
+
+const loadStoredThemeMode = (): 'light' | 'dark' | 'system' => {
+  if (typeof window === 'undefined') return 'system';
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+  } catch {}
+  return 'system';
+};
+
+const applyThemeMode = (mode: 'light' | 'dark' | 'system'): 'light' | 'dark' => {
+  let effectiveTheme: 'light' | 'dark';
+  if (mode === 'system') {
+    effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } else {
+    effectiveTheme = mode;
+  }
+  if (effectiveTheme === 'dark') {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+  return effectiveTheme;
+};
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
   theme: 'light',
+  themeMode: loadStoredThemeMode(),
+  setThemeMode: (mode) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(THEME_STORAGE_KEY, mode);
+      const effectiveTheme = applyThemeMode(mode);
+      set({ themeMode: mode, theme: effectiveTheme });
+    }
+  },
   toggleTheme: () => {
     const next = get().theme === 'light' ? 'dark' : 'light';
-    set({ theme: next });
+    set({ theme: next, themeMode: next });
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    }
     if (next === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
+    }
+  },
+  loadFromPreferences: (mode) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(THEME_STORAGE_KEY, mode);
+      const effectiveTheme = applyThemeMode(mode);
+      set({ themeMode: mode, theme: effectiveTheme });
     }
   },
 }));

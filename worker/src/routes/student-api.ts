@@ -1419,6 +1419,151 @@ studentAuthenticated.put('/settings', async (c) => {
   }
 });
 
+// ─── User Preferences (Theme, Privacy, Appearance) ───
+
+const DEFAULT_PREFERENCES = {
+  themeMode: 'system',
+  accentColor: '#0ea5e9',
+  fontSize: 16,
+  borderRadius: 16,
+  compactMode: false,
+  profileVisibility: 'Friends',
+  searchVisible: true,
+  showEmail: false,
+  showPhone: false,
+  showProgress: true,
+  activityStatus: true,
+  readReceipts: true,
+  dataSharing: false,
+  analyticsOptOut: false,
+  personalizedRecommendations: true,
+  cookieConsent: 'essential',
+  contentProtectionEnabled: true,
+  noCopy: true,
+  noRightClick: true,
+  noScreenshot: false,
+  downloadQuality: '720p',
+  wifiOnly: false,
+  language: 'bn',
+};
+
+studentAuthenticated.get('/preferences', async (c) => {
+  try {
+    const userId = c.get('studentId');
+
+    const row = await c.env.DB.prepare(
+      'SELECT * FROM user_preferences WHERE user_id = ?'
+    ).bind(userId).first();
+
+    if (!row) {
+      return c.json({ preferences: DEFAULT_PREFERENCES });
+    }
+
+    const r = row as any;
+    return c.json({
+      preferences: {
+        themeMode: r.theme_mode || 'system',
+        accentColor: r.accent_color || '#0ea5e9',
+        fontSize: r.font_size || 16,
+        borderRadius: r.border_radius || 16,
+        compactMode: !!r.compact_mode,
+        profileVisibility: r.profile_visibility || 'Friends',
+        searchVisible: !!r.search_visible,
+        showEmail: !!r.show_email,
+        showPhone: !!r.show_phone,
+        showProgress: !!r.show_progress,
+        activityStatus: !!r.activity_status,
+        readReceipts: !!r.read_receipts,
+        dataSharing: !!r.data_sharing,
+        analyticsOptOut: !!r.analytics_opt_out,
+        personalizedRecommendations: !!r.personalized_recommendations,
+        cookieConsent: r.cookie_consent || 'essential',
+        contentProtectionEnabled: !!r.content_protection_enabled,
+        noCopy: !!r.no_copy,
+        noRightClick: !!r.no_right_click,
+        noScreenshot: !!r.no_screenshot,
+        downloadQuality: r.download_quality || '720p',
+        wifiOnly: !!r.wifi_only,
+        language: r.language || 'bn',
+      },
+    });
+  } catch (error) {
+    return c.json({ preferences: DEFAULT_PREFERENCES });
+  }
+});
+
+studentAuthenticated.put('/preferences', async (c) => {
+  try {
+    const userId = c.get('studentId');
+    const prefs = await c.req.json();
+
+    await c.env.DB.prepare(`
+      INSERT INTO user_preferences (
+        user_id, theme_mode, accent_color, font_size, border_radius, compact_mode,
+        profile_visibility, search_visible, show_email, show_phone, show_progress,
+        activity_status, read_receipts, data_sharing, analytics_opt_out,
+        personalized_recommendations, cookie_consent,
+        content_protection_enabled, no_copy, no_right_click, no_screenshot,
+        download_quality, wifi_only, language
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        theme_mode = excluded.theme_mode,
+        accent_color = excluded.accent_color,
+        font_size = excluded.font_size,
+        border_radius = excluded.border_radius,
+        compact_mode = excluded.compact_mode,
+        profile_visibility = excluded.profile_visibility,
+        search_visible = excluded.search_visible,
+        show_email = excluded.show_email,
+        show_phone = excluded.show_phone,
+        show_progress = excluded.show_progress,
+        activity_status = excluded.activity_status,
+        read_receipts = excluded.read_receipts,
+        data_sharing = excluded.data_sharing,
+        analytics_opt_out = excluded.analytics_opt_out,
+        personalized_recommendations = excluded.personalized_recommendations,
+        cookie_consent = excluded.cookie_consent,
+        content_protection_enabled = excluded.content_protection_enabled,
+        no_copy = excluded.no_copy,
+        no_right_click = excluded.no_right_click,
+        no_screenshot = excluded.no_screenshot,
+        download_quality = excluded.download_quality,
+        wifi_only = excluded.wifi_only,
+        language = excluded.language,
+        updated_at = datetime('now')
+    `).bind(
+      userId,
+      prefs.themeMode || 'system',
+      prefs.accentColor || '#0ea5e9',
+      prefs.fontSize || 16,
+      prefs.borderRadius || 16,
+      prefs.compactMode ? 1 : 0,
+      prefs.profileVisibility || 'Friends',
+      prefs.searchVisible ? 1 : 0,
+      prefs.showEmail ? 1 : 0,
+      prefs.showPhone ? 1 : 0,
+      prefs.showProgress ? 1 : 0,
+      prefs.activityStatus ? 1 : 0,
+      prefs.readReceipts ? 1 : 0,
+      prefs.dataSharing ? 1 : 0,
+      prefs.analyticsOptOut ? 1 : 0,
+      prefs.personalizedRecommendations ? 1 : 0,
+      prefs.cookieConsent || 'essential',
+      prefs.contentProtectionEnabled ? 1 : 0,
+      prefs.noCopy ? 1 : 0,
+      prefs.noRightClick ? 1 : 0,
+      prefs.noScreenshot ? 1 : 0,
+      prefs.downloadQuality || '720p',
+      prefs.wifiOnly ? 1 : 0,
+      prefs.language || 'bn'
+    ).run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 500);
+  }
+});
+
 // Mount authenticated routes
 studentApiRoutes.route('/student', studentAuthenticated);
 
