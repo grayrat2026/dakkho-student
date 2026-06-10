@@ -52,3 +52,39 @@ Stage Summary:
 - R2 credential refresh has JSON formatting issue with CF API — old credentials still work (24h validity)
 - Pending: Admin Panel processing status UI, existing video migration, full end-to-end test
 - Raw MP4 cleanup set to 3 days (per user request)
+
+---
+Task ID: video-protection-completion
+Agent: Main Agent
+Task: Complete remaining Video Protection Pipeline tasks (Admin Panel status UI, VPS auto-start, R2 creds, E2E test)
+
+Work Log:
+- Updated Video type in admin panel with processing fields (processingStatus, hlsReady, availableQualities, rawDeleted, file sizes, processingError)
+- Added ProcessingStatusBadge component with 8 status configurations (pending, downloading, converting_360p/720p/1080p, uploading, complete, failed)
+- Added QualityBadges component showing HLS quality levels (360p, 720p, 1080p) with Zap icon
+- Updated videos-table.tsx desktop and mobile layouts with Processing column showing status + quality badges
+- Updated data normalization to handle both camelCase and snake_case D1 field names
+- Updated Worker videos.ts route to auto-set processing_status='pending' when video_url is provided on create
+- Fixed all VPS transcoder script URLs to use correct API paths (/api/video/stream/* instead of /admin/videos/*)
+- Updated transcoder.sh download logic to use AWS S3 CLI (aws s3 cp) instead of public R2 URLs
+- Added admin token auto-refresh to status-update.sh for long-running transcode jobs
+- Updated refresh-r2-creds.sh with graceful fallback when CF API temp credentials don't work
+- Configured VPS: .admin-creds file with admin email/password, ADMIN_TOKEN in config.env
+- Enabled and started systemd service (dakkho-transcoder.service — auto-runs poller)
+- Set up cron: poller every 5 min + cleanup daily at 3am UTC
+- Fixed Worker /info/:videoId endpoint to accept both student and admin auth
+- Removed legacy Appwrite-based API routes that broke static export build
+- Resolved Next.js build conflicts (duplicate page.tsx, force-dynamic for API routes)
+- Built and deployed Admin Panel to Cloudflare Pages
+- Deployed Worker with updated video-streaming routes
+- E2E Test: Created test video → VPS poller picked it up → Transcoded 360p + 720p → Uploaded HLS to R2 → Updated D1 status
+- Verified HLS files in R2: playlist.m3u8 + segments for 360p and 720p + master.m3u8 + meta.json
+
+Stage Summary:
+- Admin Panel shows processing status badges (Pending/Downloading/Converting/HLS Ready/Failed) + quality badges
+- VPS transcoder auto-starts via systemd service (enabled, running)
+- Cron runs poller every 5 min + cleanup daily at 3am
+- Admin token auto-refreshes during long transcode jobs
+- End-to-end pipeline verified: Video create → Pending → Download → 360p → 720p → Upload → HLS Ready
+- R2 credential refresh has fallback (existing creds still work; CF temp-access-credentials API has JSON format issues)
+- All systems deployed: Worker, Admin Panel, VPS transcoder

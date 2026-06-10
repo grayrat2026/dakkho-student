@@ -8,7 +8,7 @@ import {
   Plus,
   MoreVertical,
   Trash2,
-  Edit,
+ Edit,
   Upload,
   Link2,
   FileVideo,
@@ -21,6 +21,12 @@ import {
   Play,
   AlertCircle,
   FolderOpen,
+  Loader2,
+  ShieldCheck,
+  Clock,
+  XCircle,
+  Zap,
+  HardDrive,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -55,6 +61,56 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// Processing status config — badge color, icon, label
+const PROCESSING_STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  pending: { label: 'Pending', color: 'bg-amber-500/10 text-amber-400', icon: <Clock className="h-3 w-3" /> },
+  downloading: { label: 'Downloading', color: 'bg-blue-500/10 text-blue-400', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  converting_360p: { label: 'Converting 360p', color: 'bg-violet-500/10 text-violet-400', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  converting_720p: { label: 'Converting 720p', color: 'bg-violet-500/10 text-violet-400', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  converting_1080p: { label: 'Converting 1080p', color: 'bg-violet-500/10 text-violet-400', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  uploading: { label: 'Uploading', color: 'bg-cyan-500/10 text-cyan-400', icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  complete: { label: 'HLS Ready', color: 'bg-emerald-500/10 text-emerald-400', icon: <ShieldCheck className="h-3 w-3" /> },
+  failed: { label: 'Failed', color: 'bg-red-500/10 text-red-400', icon: <XCircle className="h-3 w-3" /> },
+};
+
+function ProcessingStatusBadge({ status }: { status?: string }) {
+  if (!status || status === 'not_started') return null;
+  const config = PROCESSING_STATUS_CONFIG[status];
+  if (!config) return null;
+  return (
+    <Badge variant="secondary" className={`${config.color} text-[10px] gap-1 px-1.5 py-0.5`}>
+      {config.icon} {config.label}
+    </Badge>
+  );
+}
+
+function QualityBadges({ qualities }: { qualities?: string }) {
+  if (!qualities) return null;
+  try {
+    const parsed: string[] = JSON.parse(qualities);
+    if (!parsed.length) return null;
+    return (
+      <div className="flex gap-1 flex-wrap">
+        {parsed.map((q) => (
+          <Badge key={q} variant="secondary" className="bg-violet-500/10 text-violet-400 text-[10px] px-1.5 py-0.5">
+            <Zap className="h-2.5 w-2.5 mr-0.5" />{q}
+          </Badge>
+        ))}
+      </div>
+    );
+  } catch {
+    return null;
+  }
+}
+
+function formatFileSize(bytes?: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${(bytes / 1073741824).toFixed(2)} GB`;
 }
 
 function slugify(text: string): string {
@@ -255,12 +311,22 @@ export default function VideosTable() {
       }
 
       // Normalize D1 boolean fields (0/1 → true/false) and null numerics
-      const normalized = docs.map((v) => ({
+      const normalized = docs.map((v: any) => ({
         ...v,
-        isPreview: Boolean(v.isPreview),
-        isPublished: Boolean(v.isPublished),
+        isPreview: Boolean(v.isPreview ?? v.is_preview),
+        isPublished: Boolean(v.isPublished ?? v.is_published),
         duration: Number(v.duration ?? 0),
-        order: Number(v.order ?? 0),
+        order: Number(v.order ?? v.sort_order ?? 0),
+        // Processing pipeline fields
+        processingStatus: v.processingStatus ?? v.processing_status ?? undefined,
+        hlsReady: Boolean(v.hlsReady ?? v.hls_ready),
+        availableQualities: v.availableQualities ?? v.available_qualities ?? undefined,
+        rawDeleted: Boolean(v.rawDeleted ?? v.raw_deleted),
+        fileSizeOriginal: v.fileSizeOriginal ?? v.file_size_original ?? undefined,
+        fileSize360p: v.fileSize360p ?? v.file_size_360p ?? undefined,
+        fileSize720p: v.fileSize720p ?? v.file_size_720p ?? undefined,
+        fileSize1080p: v.fileSize1080p ?? v.file_size_1080p ?? undefined,
+        processingError: v.processingError ?? v.processing_error ?? undefined,
       })) as VideoType[];
 
       setVideos(normalized);
@@ -489,8 +555,8 @@ export default function VideosTable() {
                 <TableRow className="border-white/[0.06] hover:bg-transparent">
                   <TableHead className="text-muted-foreground">Video</TableHead>
                   <TableHead className="text-muted-foreground">Course</TableHead>
+                  <TableHead className="text-muted-foreground">Processing</TableHead>
                   <TableHead className="text-muted-foreground">Duration</TableHead>
-                  <TableHead className="text-muted-foreground">Order</TableHead>
                   <TableHead className="text-muted-foreground">Preview</TableHead>
                   <TableHead className="text-muted-foreground">Published</TableHead>
                   <TableHead className="text-muted-foreground text-right">Actions</TableHead>
@@ -547,10 +613,27 @@ export default function VideosTable() {
                         <TableCell className="text-sm text-muted-foreground">
                           <span className="truncate max-w-[140px] block">{getCourseName(video.courseId)}</span>
                         </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <ProcessingStatusBadge status={video.processingStatus} />
+                            {video.hlsReady && video.processingStatus === 'complete' && (
+                              <QualityBadges qualities={video.availableQualities} />
+                            )}
+                            {video.processingStatus === 'failed' && video.processingError && (
+                              <p className="text-[10px] text-red-400/70 truncate max-w-[160px]" title={video.processingError}>
+                                {video.processingError}
+                              </p>
+                            )}
+                            {!video.processingStatus && video.videoUrl && (
+                              <Badge variant="secondary" className="bg-white/5 text-muted-foreground text-[10px] gap-1 px-1.5 py-0.5">
+                                <HardDrive className="h-2.5 w-2.5" /> Raw MP4
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-sm font-mono">
                           {formatDuration(video.duration)}
                         </TableCell>
-                        <TableCell className="text-sm">{video.order}</TableCell>
                         <TableCell>
                           {video.isPreview ? (
                             <Badge variant="secondary" className="bg-cyan-500/10 text-cyan-400 text-xs">
@@ -639,9 +722,18 @@ export default function VideosTable() {
                           <p className="text-sm font-medium truncate">{video.title || 'Untitled'}</p>
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
-                          {getCourseName(video.courseId)} &middot; {formatDuration(video.duration)} &middot; #{video.order}
+                          {getCourseName(video.courseId)} &middot; {formatDuration(video.duration)}
                         </p>
-                        <div className="flex gap-1 mt-1.5">
+                        <div className="flex gap-1 mt-1.5 flex-wrap">
+                          <ProcessingStatusBadge status={video.processingStatus} />
+                          {video.hlsReady && video.processingStatus === 'complete' && (
+                            <QualityBadges qualities={video.availableQualities} />
+                          )}
+                          {!video.processingStatus && video.videoUrl && (
+                            <Badge variant="secondary" className="bg-white/5 text-muted-foreground text-[10px] gap-1 px-1.5 py-0.5">
+                              <HardDrive className="h-2.5 w-2.5" /> Raw MP4
+                            </Badge>
+                          )}
                           {video.isPreview && (
                             <Badge variant="secondary" className="bg-cyan-500/10 text-cyan-400 text-[10px]">
                               <Eye className="h-2.5 w-2.5 mr-0.5" /> Preview

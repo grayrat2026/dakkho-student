@@ -63,9 +63,12 @@ videoRoutes.post('/', async (c) => {
     const id = crypto.randomUUID();
     const slug = (data.slug as string) || ((data.title as string) || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
+    // Set processing_status based on whether video_url is provided
+    const processingStatus = (data.video_url && String(data.video_url).trim() !== '') ? 'pending' : null;
+
     await c.env.DB.prepare(`
-      INSERT INTO videos (id, title, slug, description, course_id, video_url, thumbnail_url, duration, sort_order, is_preview, is_published, lesson_id, lesson_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO videos (id, title, slug, description, course_id, video_url, thumbnail_url, duration, sort_order, is_preview, is_published, lesson_id, lesson_type, processing_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id,
       data.title || '',
@@ -79,7 +82,8 @@ videoRoutes.post('/', async (c) => {
       data.is_preview ? 1 : 0,
       data.is_published ? 1 : 0,
       data.lesson_id || null,
-      data.lesson_type || null
+      data.lesson_type || null,
+      processingStatus
     ).run();
 
     const created = await c.env.DB.prepare('SELECT * FROM videos WHERE id = ?').bind(id).first();

@@ -61,6 +61,18 @@ export interface Video {
   order: number;
   isPreview: boolean;
   isPublished: boolean;
+  // Processing fields (from video protection pipeline)
+  processingStatus?: string;
+  hlsReady?: boolean;
+  availableQualities?: string; // JSON string of quality array e.g. '["360p","720p"]'
+  rawDeleted?: boolean;
+  fileSizeOriginal?: number;
+  fileSize360p?: number;
+  fileSize720p?: number;
+  fileSize1080p?: number;
+  processingStartedAt?: string;
+  processingCompletedAt?: string;
+  processingError?: string;
   createdAt: string;
   updatedAt: string;
 }
