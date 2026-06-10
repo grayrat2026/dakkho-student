@@ -321,7 +321,22 @@ studentApiRoutes.get('/courses', async (c) => {
       `SELECT * FROM courses ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
     ).bind(...params, limit, offset).all();
 
-    return c.json({ courses: result.results, total });
+    // Enrich courses with auto-calculated duration from videos
+    const enrichedCourses = await Promise.all(result.results.map(async (course: any) => {
+      try {
+        const vidStats = await c.env.DB.prepare(
+          'SELECT COUNT(*) as count, COALESCE(SUM(duration), 0) as total_duration FROM videos WHERE course_id = ?'
+        ).bind(course.id).first();
+        const vc = (vidStats as any)?.count || 0;
+        const td = (vidStats as any)?.total_duration || 0;
+        const avg = vc > 0 ? Math.round(td / vc * 10) / 10 : 0;
+        return { ...course, duration: avg, total_videos: vc, total_video_duration: td };
+      } catch {
+        return course;
+      }
+    }));
+
+    return c.json({ courses: enrichedCourses, total });
   } catch (error) {
     return c.json({ error: getErrorMessage(error) }, 500);
   }
@@ -371,7 +386,30 @@ studentApiRoutes.get('/courses/:id', async (c) => {
       // course_subjects or subjects table may not exist — fallback empty
     }
 
-    return c.json({ course, instructors, learningPoints, subjects });
+    // Auto-calculate duration from videos
+    let videoStats: any = null;
+    try {
+      videoStats = await c.env.DB.prepare(
+        'SELECT COUNT(*) as count, COALESCE(SUM(duration), 0) as total_duration FROM videos WHERE course_id = ?'
+      ).bind(id).first();
+    } catch {
+      // videos table may not exist — fallback empty
+    }
+    const videoCount = videoStats?.count || 0;
+    const totalDuration = videoStats?.total_duration || 0;
+    const avgDuration = videoCount > 0 ? Math.round(totalDuration / videoCount * 10) / 10 : 0;
+
+    return c.json({
+      course: {
+        ...(course as any),
+        duration: avgDuration,
+        total_videos: videoCount,
+        total_video_duration: totalDuration,
+      },
+      instructors,
+      learningPoints,
+      subjects,
+    });
   } catch (error) {
     return c.json({ error: getErrorMessage(error) }, 500);
   }

@@ -63,16 +63,23 @@ courseRoutes.get('/', async (c) => {
 
     // Enrich courses with junction table data
     const enrichedResults = await Promise.all(result.results.map(async (course: any) => {
-      const [cats, insts, subs] = await Promise.all([
+      const [cats, insts, subs, vidInfo] = await Promise.all([
         c.env.DB.prepare('SELECT category_id FROM course_categories WHERE course_id = ? ORDER BY sort_order').bind(course.id).all(),
         c.env.DB.prepare('SELECT instructor_id FROM course_instructors WHERE course_id = ? ORDER BY sort_order').bind(course.id).all(),
         c.env.DB.prepare('SELECT subject_id FROM course_subjects WHERE course_id = ? ORDER BY sort_order').bind(course.id).all(),
+        c.env.DB.prepare('SELECT COUNT(*) as count, COALESCE(SUM(duration), 0) as total_duration FROM videos WHERE course_id = ?').bind(course.id).first(),
       ]);
+      const videoCount = (vidInfo as any)?.count || 0;
+      const totalDuration = (vidInfo as any)?.total_duration || 0;
+      const avgDuration = videoCount > 0 ? Math.round(totalDuration / videoCount * 10) / 10 : 0;
       return {
         ...course,
         category_ids: cats.results.map((r: any) => r.category_id),
         instructor_ids: insts.results.map((r: any) => r.instructor_id),
         subject_ids: subs.results.map((r: any) => r.subject_id),
+        total_videos: videoCount,
+        duration: avgDuration,
+        total_video_duration: totalDuration,
       };
     }));
 

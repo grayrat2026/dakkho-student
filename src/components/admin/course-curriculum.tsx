@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
@@ -18,6 +18,9 @@ import {
   GripVertical,
   Eye,
   Clock,
+  Upload,
+  CheckCircle2,
+  Link,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,7 +55,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { apiGet, apiPost, apiPut, apiDelete } from '@/lib/api-client';
+import { apiGet, apiPost, apiPut, apiDelete, apiUpload, ApiError } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -197,8 +201,13 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
     duration: 0,
     order: 0,
     isPreview: false,
+    videoType: 'upload' as 'upload' | 'link' | 'youtube',
   });
   const [videoSaving, setVideoSaving] = useState(false);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoDragOver, setVideoDragOver] = useState(false);
+  const [extractedDuration, setExtractedDuration] = useState<number | null>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
 
   // Delete dialog
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -460,6 +469,78 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
   // Video CRUD
   // -------------------------------------------------------------------------
 
+  // Helper: Extract duration from video file using HTML5 video element
+  const extractVideoDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        const durationSeconds = video.duration;
+        URL.revokeObjectURL(video.src);
+        // Convert to minutes (rounded to 1 decimal)
+        const durationMinutes = Math.round(durationSeconds / 60 * 10) / 10;
+        resolve(durationMinutes);
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(video.src);
+        resolve(0);
+      };
+      video.src = URL.createObjectURL(file);
+    });
+  };
+
+  // Helper: Check if URL is a YouTube link and extract embed URL
+  const getYouTubeEmbedUrl = (url: string): string | null => {
+    const ytRegex = /(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    const match = url.match(ytRegex);
+    if (match) {
+      return `https://www.youtube.com/embed/${match[1]}`;
+    }
+    return null;
+  };
+
+  // Handle video file upload + duration extraction
+  const handleVideoFileUpload = async (file: File) => {
+    setVideoUploading(true);
+    setExtractedDuration(null);
+    try {
+      // Extract duration from file first
+      const duration = await extractVideoDuration(file);
+      if (duration > 0) {
+        setExtractedDuration(duration);
+        setVideoForm((prev) => ({ ...prev, duration }));
+      }
+
+      // Upload to R2
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('bucket', 'videos');
+      const result = await apiUpload('/upload', formData) as Record<string, unknown>;
+      const url = result.url as string;
+      setVideoForm((prev) => ({ ...prev, videoUrl: url, videoType: 'upload' }));
+      toast({ title: 'Video uploaded', description: duration > 0 ? `Duration: ${duration} min (auto-detected)` : 'File uploaded successfully' });
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Upload failed';
+      toast({ title: 'Upload Error', description: message, variant: 'destructive' });
+    } finally {
+      setVideoUploading(false);
+    }
+  };
+
+  const handleVideoFileDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setVideoDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) {
+      handleVideoFileUpload(file);
+    }
+  };
+
+  const handleVideoFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleVideoFileUpload(file);
+  };
+
   const openCreateVideo = (lessonId?: string, chapterId?: string) => {
     setEditVideo(null);
     const lesson = lessons.find((l) => l.id === lessonId);
@@ -473,12 +554,23 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
       duration: 0,
       order: 0,
       isPreview: false,
+      videoType: 'upload',
     });
+    setExtractedDuration(null);
     setVideoFormOpen(true);
   };
 
   const openEditVideo = (video: VideoItem) => {
     setEditVideo(video);
+    // Detect video type from URL
+    let vType: 'upload' | 'link' | 'youtube' = 'link';
+    if (video.videoUrl) {
+      if (getYouTubeEmbedUrl(video.videoUrl)) {
+        vType = 'youtube';
+      } else if (video.videoUrl.includes('r2.dev') || video.videoUrl.includes('pub-')) {
+        vType = 'upload';
+      }
+    }
     setVideoForm({
       title: video.title,
       subjectId: video.subjectId || '',
@@ -489,7 +581,9 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
       duration: video.duration,
       order: video.order,
       isPreview: video.isPreview,
+      videoType: vType,
     });
+    setExtractedDuration(null);
     setVideoFormOpen(true);
   };
 
@@ -497,6 +591,13 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
     if (!videoForm.title.trim()) return;
     setVideoSaving(true);
     try {
+      // Convert YouTube URL to embed URL if applicable
+      let finalVideoUrl = videoForm.videoUrl;
+      if (videoForm.videoType === 'youtube' && finalVideoUrl) {
+        const embedUrl = getYouTubeEmbedUrl(finalVideoUrl);
+        if (embedUrl) finalVideoUrl = embedUrl;
+      }
+
       const payload: Record<string, unknown> = {
         course_id: courseId,
         title: videoForm.title,
@@ -504,9 +605,9 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
         chapter_id: videoForm.chapterId || undefined,
         lesson_id: videoForm.lessonId || undefined,
         lesson_type: videoForm.lessonType || undefined,
-        video_url: videoForm.videoUrl || undefined,
+        video_url: finalVideoUrl || undefined,
         duration: videoForm.duration,
-        order: videoForm.order,
+        sort_order: videoForm.order,
         is_preview: videoForm.isPreview,
       };
       if (editVideo) {
@@ -1302,7 +1403,7 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Title</Label>
+              <Label className="text-muted-foreground">Video Title</Label>
               <Input
                 value={videoForm.title}
                 onChange={(e) => setVideoForm({ ...videoForm, title: e.target.value })}
@@ -1310,15 +1411,110 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
                 placeholder="Enter video title"
               />
             </div>
+
+            {/* Video Source: Upload / Link / YouTube Embed */}
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Video URL</Label>
-              <Input
-                value={videoForm.videoUrl}
-                onChange={(e) => setVideoForm({ ...videoForm, videoUrl: e.target.value })}
-                className="bg-white/[0.04] border-white/[0.08]"
-                placeholder="https://..."
-              />
+              <Label className="text-muted-foreground">Video Source</Label>
+              <Tabs
+                value={videoForm.videoType}
+                onValueChange={(v) => setVideoForm({ ...videoForm, videoType: v as 'upload' | 'link' | 'youtube', videoUrl: '', duration: 0 })}
+                className="w-full"
+              >
+                <TabsList className="bg-white/[0.04] border border-white/[0.08] w-full">
+                  <TabsTrigger value="upload" className="flex-1 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
+                    <Upload className="h-3.5 w-3.5 mr-1.5" /> Upload
+                  </TabsTrigger>
+                  <TabsTrigger value="link" className="flex-1 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
+                    <Link className="h-3.5 w-3.5 mr-1.5" /> Link
+                  </TabsTrigger>
+                  <TabsTrigger value="youtube" className="flex-1 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400">
+                    <Video className="h-3.5 w-3.5 mr-1.5" /> YouTube
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="upload" className="mt-3">
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setVideoDragOver(true); }}
+                    onDragLeave={() => setVideoDragOver(false)}
+                    onDrop={handleVideoFileDrop}
+                    onClick={() => videoFileRef.current?.click()}
+                    className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
+                      videoDragOver
+                        ? 'border-emerald-500/50 bg-emerald-500/5'
+                        : 'border-white/10 hover:border-white/20 hover:bg-white/[0.02]'
+                    } ${videoUploading ? 'opacity-60 pointer-events-none' : ''}`}
+                  >
+                    <input
+                      ref={videoFileRef}
+                      type="file"
+                      accept="video/*"
+                      onChange={handleVideoFileSelect}
+                      className="hidden"
+                    />
+                    {videoUploading ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-xs text-muted-foreground">Uploading & extracting duration...</p>
+                      </div>
+                    ) : videoForm.videoUrl && videoForm.videoType === 'upload' ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <CheckCircle2 className="h-7 w-7 text-emerald-400" />
+                        <p className="text-xs text-muted-foreground truncate max-w-full">Video uploaded successfully</p>
+                        {extractedDuration !== null && extractedDuration > 0 && (
+                          <p className="text-xs text-emerald-400 flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> Duration: {extractedDuration} min (auto-detected)
+                          </p>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-emerald-400 h-6"
+                          onClick={(e) => { e.stopPropagation(); videoFileRef.current?.click(); }}
+                        >
+                          Replace file
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-2">
+                        <Upload className="h-7 w-7 text-muted-foreground/40" />
+                        <p className="text-xs text-muted-foreground">Drag & drop or click to upload</p>
+                        <p className="text-[10px] text-muted-foreground/50">MP4, WebM, MOV — Duration auto-detected</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+                <TabsContent value="link" className="mt-3">
+                  <Input
+                    value={videoForm.videoType === 'link' ? videoForm.videoUrl : ''}
+                    onChange={(e) => setVideoForm({ ...videoForm, videoUrl: e.target.value, videoType: 'link' })}
+                    className="bg-white/[0.04] border-white/[0.08]"
+                    placeholder="https://example.com/video.mp4"
+                  />
+                  <p className="text-[10px] text-muted-foreground/50 mt-1.5">Direct video file URL (MP4, WebM, etc.)</p>
+                </TabsContent>
+                <TabsContent value="youtube" className="mt-3">
+                  <Input
+                    value={videoForm.videoType === 'youtube' ? videoForm.videoUrl : ''}
+                    onChange={(e) => setVideoForm({ ...videoForm, videoUrl: e.target.value, videoType: 'youtube' })}
+                    className="bg-white/[0.04] border-white/[0.08]"
+                    placeholder="https://youtube.com/watch?v=... or https://youtu.be/..."
+                  />
+                  <p className="text-[10px] text-muted-foreground/50 mt-1.5">YouTube link will be auto-converted to embed</p>
+                  {videoForm.videoType === 'youtube' && videoForm.videoUrl && getYouTubeEmbedUrl(videoForm.videoUrl) && (
+                    <div className="mt-2 rounded-lg overflow-hidden border border-white/[0.08] aspect-video">
+                      <iframe
+                        src={getYouTubeEmbedUrl(videoForm.videoUrl)!}
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        title="YouTube preview"
+                      />
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
             </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Subject</Label>
@@ -1416,16 +1612,34 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
                 </Select>
               </div>
             </div>
+
+            {/* Duration — auto-filled from video file, or manually editable for link/youtube */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-muted-foreground">Duration (minutes)</Label>
+                <Label className="text-muted-foreground">
+                  Duration (minutes)
+                  {extractedDuration !== null && extractedDuration > 0 && (
+                    <span className="text-emerald-400 ml-1.5 text-[10px]">auto-detected</span>
+                  )}
+                </Label>
                 <Input
                   type="number"
                   min={0}
+                  step={0.1}
                   value={videoForm.duration}
-                  onChange={(e) => setVideoForm({ ...videoForm, duration: Number(e.target.value) })}
+                  onChange={(e) => {
+                    setVideoForm({ ...videoForm, duration: Number(e.target.value) });
+                    setExtractedDuration(null);
+                  }}
                   className="bg-white/[0.04] border-white/[0.08]"
                 />
+                {videoForm.duration > 0 && (
+                  <p className="text-[10px] text-muted-foreground/60">
+                    {videoForm.duration < 60
+                      ? `${videoForm.duration} min`
+                      : `${Math.floor(videoForm.duration / 60)}h ${Math.round(videoForm.duration % 60)}m`}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Order</Label>
@@ -1459,7 +1673,7 @@ export default function CourseCurriculum({ courseId }: CourseCurriculumProps) {
             </Button>
             <Button
               onClick={handleSaveVideo}
-              disabled={videoSaving || !videoForm.title.trim()}
+              disabled={videoSaving || videoUploading || !videoForm.title.trim()}
               className="gradient-purple text-white gap-2"
             >
               {videoSaving && <RefreshCw className="h-4 w-4 animate-spin" />}

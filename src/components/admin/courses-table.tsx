@@ -353,7 +353,7 @@ export default function CoursesTable() {
         semester: form.semester ? Number(form.semester) : undefined,
         level: form.level,
         language: form.language,
-        duration: form.duration,
+        // duration is auto-calculated from videos — not sent manually
         price: form.price,
         is_featured: form.isFeatured,
         is_published: form.isPublished,
@@ -704,7 +704,7 @@ export default function CoursesTable() {
                     <td className="hidden xl:table-cell text-muted-foreground text-sm">
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {formatDuration(course.duration)}
+                        {course.duration > 0 ? formatDuration(course.duration) : '—'}
                       </span>
                     </td>
 
@@ -1390,20 +1390,24 @@ export default function CoursesTable() {
               </div>
             </div>
 
-            {/* Duration + Price */}
+            {/* Duration (auto from videos) + Price */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="duration" className="text-muted-foreground">
-                  Duration (minutes)
+                <Label className="text-muted-foreground">
+                  Avg Duration (min)
+                  <span className="text-emerald-400/70 text-[10px] ml-1.5">auto from videos</span>
                 </Label>
-                <Input
-                  id="duration"
-                  type="number"
-                  min={0}
-                  value={form.duration}
-                  onChange={(e) => setForm({ ...form, duration: Number(e.target.value) })}
-                  className="bg-white/[0.04] border-white/[0.08]"
-                />
+                <div className="flex items-center h-9 px-3 rounded-md bg-white/[0.02] border border-white/[0.06] text-sm text-muted-foreground">
+                  {form.duration > 0 ? (
+                    <span className="flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5 text-emerald-400" />
+                      {form.duration} min avg
+                      <span className="text-muted-foreground/40">({form.duration < 60 ? `${form.duration}m` : `${Math.floor(form.duration / 60)}h ${Math.round(form.duration % 60)}m`})</span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/40">No videos yet — add videos in curriculum</span>
+                  )}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="price" className="text-muted-foreground">
