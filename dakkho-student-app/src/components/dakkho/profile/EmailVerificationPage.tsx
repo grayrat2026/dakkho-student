@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuthStore, useNavigationStore } from '@/lib/store';
@@ -35,23 +35,27 @@ export function EmailVerificationPage() {
   const navigate = useNavigationStore((s) => s.navigate);
   const goBack = useNavigationStore((s) => s.goBack);
 
-  // Initialize cooldown from localStorage (survives page refresh)
-  const getInitialCooldown = (): number => {
-    const endTime = loadCooldownEnd();
-    if (!endTime) return 0;
-    const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
-    if (remaining <= 0) {
-      clearCooldownEnd();
-      return 0;
-    }
-    return remaining;
-  };
-
   const [otpError, setOtpError] = useState<string | undefined>();
   const [isVerifying, setIsVerifying] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
-  const [cooldown, setCooldown] = useState(getInitialCooldown);
+  // Start at 0 so SSR and client hydration match; load from localStorage in useEffect
+  const [cooldown, setCooldown] = useState(0);
   const [resendSent, setResendSent] = useState(false);
+  const cooldownHydrated = useRef(false);
+
+  // ── Hydrate cooldown from localStorage after mount (survives page refresh) ──
+  useEffect(() => {
+    if (cooldownHydrated.current) return;
+    cooldownHydrated.current = true;
+    const endTime = loadCooldownEnd();
+    if (!endTime) return;
+    const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+    if (remaining > 0) {
+      setCooldown(remaining);
+    } else {
+      clearCooldownEnd();
+    }
+  }, []);
 
   // Cooldown timer
   useEffect(() => {
@@ -84,9 +88,12 @@ export function EmailVerificationPage() {
     }
   }, [user?.email, verifyOTP]);
 
-  const handleResend = useCallback(async () => {
-    if (!user?.email || cooldown > 0 || isVerifying) return;
+  const isResending = useRef(false);
 
+  const handleResend = useCallback(async () => {
+    if (!user?.email || cooldown > 0 || isVerifying || isResending.current) return;
+
+    isResending.current = true;
     try {
       await authApi.resendOTP({ email: user.email });
       const endTime = Date.now() + OTP_RESEND_COOLDOWN * 1000;
@@ -97,6 +104,8 @@ export function EmailVerificationPage() {
       setTimeout(() => setResendSent(false), 3000);
     } catch {
       setOtpError('Failed to resend code. Please try again.');
+    } finally {
+      isResending.current = false;
     }
   }, [user?.email, cooldown, isVerifying]);
 
@@ -239,11 +248,14 @@ export function EmailVerificationPage() {
             </motion.div>
           )}
 
-          {/* Resend feedback - clearly non-interactive notification */}
+          {/* Resend feedback — purely informational, never interactive */}
           <AnimatePresence>
             {resendSent && (
               <motion.div
-                className="flex items-center gap-2 justify-center text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/10 rounded-lg px-3 py-2 mb-3 select-none pointer-events-none"
+                role="status"
+                aria-live="polite"
+                className="flex items-center gap-2 justify-center text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/10 rounded-lg px-3 py-2 mb-3 select-none"
+                style={{ pointerEvents: 'none' }}
                 initial={{ opacity: 0, y: -5 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
