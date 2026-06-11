@@ -70,6 +70,8 @@ export function CourseDetailPage() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<any>(null);
   const [isEnrolling, setIsEnrolling] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [enrollError, setEnrollError] = useState<string | null>(null);
 
   // Handle tab changes — update URL
@@ -804,6 +806,7 @@ export function CourseDetailPage() {
             ) : (
               <GradientButton className="w-full" size="lg" onClick={() => {
                 setSelectedPackage(cheapestPackage || null);
+                setPaymentError(null);
                 setShowCheckout(true);
               }}>
                 <Play className="w-4 h-4" />
@@ -881,21 +884,32 @@ export function CourseDetailPage() {
                 <span className="text-xl font-extrabold text-sky-500">৳{selectedPackage ? selectedPackage.price : course.price}</span>
               </div>
             </div>
+            {paymentError && (
+              <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-600 dark:text-red-400">
+                {paymentError}
+              </div>
+            )}
             <div className="flex gap-3">
               <button
-                onClick={() => setShowCheckout(false)}
+                onClick={() => { setShowCheckout(false); setPaymentError(null); }}
                 className="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg border border-border hover:bg-muted/50 transition-colors"
               >
                 Cancel
               </button>
               <GradientButton
                 className="flex-1"
+                disabled={isPaying}
                 onClick={async () => {
+                  setIsPaying(true);
+                  setPaymentError(null);
                   try {
                     const payload: any = { course_id: course.id };
                     if (selectedPackage) {
                       payload.package_id = selectedPackage.id;
                     }
+                    // Send customer info from auth store for reliability
+                    if (user?.fullName) payload.customer_name = user.fullName;
+                    if (user?.email) payload.customer_email = user.email;
                     const res = await paymentApi.create(payload);
                     if (res.pp_url) {
                       // Store order_id in localStorage so PaymentStatusPage can poll status
@@ -903,13 +917,25 @@ export function CourseDetailPage() {
                         localStorage.setItem('dakkho_pending_order_id', res.order_id);
                       }
                       window.location.href = res.pp_url;
+                    } else {
+                      setPaymentError('Payment gateway did not return a checkout URL. Please try again.');
                     }
                   } catch (err: any) {
                     console.error('Payment creation failed:', err);
+                    const msg = err?.message || err?.error || 'Payment failed. Please try again.';
+                    if (err?.code === 'EMAIL_NOT_VERIFIED') {
+                      setPaymentError('Please verify your email address before making a payment.');
+                    } else if (err?.status === 401) {
+                      setPaymentError('Please log in to continue with payment.');
+                    } else {
+                      setPaymentError(msg);
+                    }
+                  } finally {
+                    setIsPaying(false);
                   }
                 }}
               >
-                Pay with bKash/Nagad/Card
+                {isPaying ? 'Processing...' : 'Pay'}
               </GradientButton>
             </div>
           </GlassCard>
@@ -969,6 +995,7 @@ export function CourseDetailPage() {
             size="lg"
             onClick={() => {
               setSelectedPackage(cheapestPackage || null);
+              setPaymentError(null);
               setShowCheckout(true);
             }}
           >

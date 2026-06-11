@@ -2460,14 +2460,20 @@ studentApiRoutes.post('/payments/create', async (c) => {
     // Get user info from session/D1 (fallback to request body)
     const userDoc = await getStudentUserDoc(c.env, auth.userId!);
     const u = userDoc as any;
-    
-    const fullname = customer_name || u?.full_name || auth.name || '';
+
+    // Try to get name from user doc, session, or derive from email
+    let fullname = customer_name || u?.full_name || u?.name || auth.name || '';
     const email = customer_email || u?.email || auth.email || '';
     const phone = customer_phone || u?.phone || '';
 
+    // If name still empty, derive a display name from email
+    if (!fullname && email) {
+      fullname = email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
     if (!fullname || !email) {
-      return c.json({ 
-        error: 'Customer name and email are required. Please provide customer_name and customer_email.',
+      return c.json({
+        error: 'Customer name and email are required. Please update your profile or provide customer_name and customer_email.',
         code: 'CUSTOMER_INFO_REQUIRED'
       }, 400);
     }
