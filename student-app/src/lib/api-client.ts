@@ -235,6 +235,14 @@ export const liveClassApi = {
     api.get<{ success: boolean; provider: string; sessionId: string; url: string; iceServers: RTCIceServer[]; room: string }>(`/api/live-classes/${scheduleId}/calls-session`),
 };
 
+// Dakkho Realtime (Cloudflare Calls "Dakkho Realtime" App)
+export const realtimeApi = {
+  createSession: (room: string) =>
+    api.get<{ success: boolean; provider: string; sessionId: string; url: string; iceServers: RTCIceServer[]; appId: string; room: string }>(`/api/realtime/session?room=${encodeURIComponent(room)}`),
+  getStatus: () =>
+    api.get<{ available: boolean; appId: string | null }>('/api/realtime/status'),
+};
+
 // Course Packages
 export const packageApi = {
   list: (courseId: string) =>

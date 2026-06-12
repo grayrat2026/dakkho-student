@@ -4,6 +4,13 @@ export const APP_DESCRIPTION = "Bangladesh's Premier Polytechnic Student Streami
 // LiveKit public URL for client SDK — credentials are stored in KV on backend
 export const LIVEKIT_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL || 'wss://dakkho-u74kq16n.livekit.cloud';
 
+// Dakkho Realtime (Cloudflare Calls) — configured via KV on the backend
+// The frontend gets session details from the API, no credentials stored here
+export const DAKKHO_REALTIME = {
+  appId: 'c1ed0d1aeae3959e2773545be2a3f2bb',
+  rtcEndpoint: 'https://rtc.live.cloudflare.com/v1',
+};
+
 export const COLORS = {
   primary: '#0ea5e9',
   primaryDeep: '#2563eb',
