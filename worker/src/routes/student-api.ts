@@ -15,6 +15,7 @@ import { DEFAULT_CONFIG, type ServerConfig } from '../lib/types';
 import { getBucketForType, getPublicUrl } from '../lib/r2';
 import { getErrorMessage, generateId, getSessionExpiry } from '../lib/utils';
 import { hashPassword, verifyPassword } from '../lib/auth-password';
+import { getLiveKitConfig, generateLiveKitToken } from '../lib/livekit';
 
 const studentApiRoutes = new Hono<{ Bindings: Env; Variables: StudentAuthVariables }>();
 
@@ -237,6 +238,79 @@ studentApiRoutes.get('/live-classes', async (c) => {
     ).all();
 
     return c.json({ liveClasses: result.results });
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 500);
+  }
+});
+
+// GET /live-classes/:id/livekit-token — Generate a LiveKit token for a student to join a class
+studentApiRoutes.get('/live-classes/:id/livekit-token', studentAuthMiddleware, async (c) => {
+  try {
+    const studentId = c.get('studentId');
+    const scheduleId = c.req.param('id');
+
+    // Find the schedule
+    const schedule = await c.env.DB.prepare(
+      'SELECT * FROM live_class_schedules WHERE id = ? AND is_active = 1'
+    ).bind(scheduleId).first();
+
+    if (!schedule) {
+      return c.json({ error: 'Live class not found' }, 404);
+    }
+
+    const s = schedule as any;
+    if (s.platform !== 'livekit' && !s.meeting_url?.startsWith('livekit://')) {
+      return c.json({ error: 'This class does not use LiveKit', externalUrl: s.meeting_url }, 400);
+    }
+
+    if (s.status === 'completed' || s.status === 'cancelled') {
+      return c.json({ error: 'This class has ended' }, 400);
+    }
+
+    // Verify student is enrolled in the course
+    if (s.course_id) {
+      const enrollment = await c.env.DB.prepare(
+        'SELECT id FROM enrollments WHERE student_id = ? AND course_id = ? AND status = ?'
+      ).bind(studentId, s.course_id, 'active').first();
+
+      if (!enrollment) {
+        return c.json({ error: 'You must be enrolled in this course to join the live class' }, 403);
+      }
+    }
+
+    const config = await getLiveKitConfig(c.env.KV_CONFIG);
+    if (!config) {
+      return c.json({ error: 'LiveKit is not configured' }, 503);
+    }
+
+    // Extract room name from meeting_url
+    const roomName = s.meeting_url?.replace('livekit://', '') || `dakkho-class-${s.id}`;
+
+    // Get student name for display
+    const student = await c.env.DB.prepare(
+      'SELECT name FROM students WHERE id = ?'
+    ).bind(studentId).first();
+    const studentName = (student as any)?.name || 'Student';
+
+    const token = await generateLiveKitToken({
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+      identity: `student-${studentId}`,
+      name: studentName,
+      room: roomName,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+      canAdmin: false, // Students are not room admins
+      ttl: 6 * 60 * 60,
+    });
+
+    return c.json({
+      success: true,
+      token,
+      url: config.url,
+      room: roomName,
+    });
   } catch (error) {
     return c.json({ error: getErrorMessage(error) }, 500);
   }

@@ -20,6 +20,7 @@ import { validateInstructorSession, deleteInstructorSession, createInstructorSes
 import { authenticateUser, hashPassword, verifyPassword } from '../lib/auth-password';
 import { getErrorMessage, generateId, getSessionExpiry } from '../lib/utils';
 import { getPublicUrl } from '../lib/r2';
+import { getLiveKitConfig, generateLiveKitToken, generateRoomName, verifyLiveKitWebhook } from '../lib/livekit';
 
 const instructorRoutes = new Hono<{ Bindings: Env; Variables: InstructorOrAdminAuthVariables }>();
 
@@ -2955,6 +2956,7 @@ instructorRoutes.delete('/resources/:id', instructorOrAdminMiddleware, async (c)
 // ═══════════════════════════════════════════════════
 
 // POST /schedule — Create live class (verify course ownership if course_id provided)
+// If platform is 'livekit' or not specified, auto-generates a LiveKit room URL
 instructorRoutes.post('/schedule', instructorOrAdminMiddleware, async (c) => {
   try {
     const authRole = c.get('authRole');
@@ -2965,10 +2967,10 @@ instructorRoutes.post('/schedule', instructorOrAdminMiddleware, async (c) => {
     }
 
     const body = await c.req.json();
-    const { title, course_id, scheduled_at, duration_minutes, meeting_url, platform, description } = body;
+    let { title, course_id, scheduled_at, duration_minutes, meeting_url, platform, description } = body;
 
-    if (!title || !scheduled_at || !duration_minutes || !meeting_url) {
-      return c.json({ error: 'title, scheduled_at, duration_minutes, and meeting_url are required' }, 400);
+    if (!title || !scheduled_at || !duration_minutes) {
+      return c.json({ error: 'title, scheduled_at, and duration_minutes are required' }, 400);
     }
 
     // Verify course ownership if course_id provided
@@ -2981,12 +2983,46 @@ instructorRoutes.post('/schedule', instructorOrAdminMiddleware, async (c) => {
 
     const now = new Date().toISOString();
 
+    // Auto-generate LiveKit room if platform is livekit or no meeting_url provided
+    const usePlatform = platform || 'livekit';
+    let livekitRoomName = '';
+
+    if (usePlatform === 'livekit' || !meeting_url) {
+      // We'll create the schedule first, then generate the room name from the ID
+      const result = await c.env.DB.prepare(`
+        INSERT INTO live_class_schedules (title, course_id, instructor_id, scheduled_at, duration_minutes, meeting_url, platform, description, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      `).bind(
+        title, course_id || null, instructorId, scheduled_at,
+        duration_minutes, '', usePlatform,
+        description || null, now, now
+      ).run();
+
+      const insertedId = result.meta?.last_row_id;
+
+      // Generate LiveKit room name from schedule ID
+      livekitRoomName = generateRoomName(insertedId);
+      const livekitUrl = `livekit://${livekitRoomName}`;
+
+      // Update the meeting_url with the LiveKit room reference
+      await c.env.DB.prepare(
+        'UPDATE live_class_schedules SET meeting_url = ? WHERE rowid = ?'
+      ).bind(livekitUrl, insertedId).run();
+
+      const row = await c.env.DB.prepare(
+        'SELECT * FROM live_class_schedules WHERE rowid = ?'
+      ).bind(insertedId).first();
+
+      return c.json({ success: true, schedule: row, livekit: { roomName: livekitRoomName } }, 201);
+    }
+
+    // External meeting URL (Zoom, Meet, etc.)
     const result = await c.env.DB.prepare(`
       INSERT INTO live_class_schedules (title, course_id, instructor_id, scheduled_at, duration_minutes, meeting_url, platform, description, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
     `).bind(
       title, course_id || null, instructorId, scheduled_at,
-      duration_minutes, meeting_url, platform || null,
+      duration_minutes, meeting_url, usePlatform,
       description || null, now, now
     ).run();
 
@@ -3150,6 +3186,181 @@ instructorRoutes.post('/support/tickets/:id/messages', instructorOrAdminMiddlewa
     ).bind(insertedId).first();
 
     return c.json({ success: true, message: row }, 201);
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 500);
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// LIVEKIT — In-App Video Conference Integration
+// ═══════════════════════════════════════════════════
+
+// GET /livekit/token — Generate a LiveKit access token for the instructor
+// Query params: room (required), identity (optional, defaults to instructor ID)
+instructorRoutes.get('/livekit/token', instructorOrAdminMiddleware, async (c) => {
+  try {
+    const config = await getLiveKitConfig(c.env.KV_CONFIG);
+    if (!config) {
+      return c.json({ error: 'LiveKit is not configured. Add credentials to KV.' }, 503);
+    }
+
+    const room = c.req.query('room');
+    if (!room) {
+      return c.json({ error: 'room query parameter is required' }, 400);
+    }
+
+    const authRole = c.get('authRole');
+    const instructorId = authRole === 'admin' ? c.req.query('instructorId')! : c.get('instructorId');
+    const identity = c.req.query('identity') || instructorId || 'instructor';
+    const name = c.req.query('name') || '';
+
+    // Check if the room corresponds to a valid schedule
+    const schedule = await c.env.DB.prepare(
+      'SELECT id, instructor_id, status FROM live_class_schedules WHERE meeting_url LIKE ? AND is_active = 1'
+    ).bind(`%${room}%`).first();
+
+    // Instructor can always join their own rooms; admin can join any room
+    if (schedule && schedule.instructor_id !== instructorId && authRole !== 'admin') {
+      return c.json({ error: 'You do not have access to this room' }, 403);
+    }
+
+    const token = await generateLiveKitToken({
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+      identity,
+      name,
+      room,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+      canAdmin: true, // Instructor is room admin
+      ttl: 6 * 60 * 60, // 6 hours
+    });
+
+    return c.json({
+      success: true,
+      token,
+      url: config.url,
+      room,
+      identity,
+    });
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 500);
+  }
+});
+
+// POST /livekit/token — Generate a LiveKit access token (POST version, for student access)
+// Body: { room: string, identity?: string, name?: string, canPublish?: boolean, canAdmin?: boolean }
+instructorRoutes.post('/livekit/token', instructorOrAdminMiddleware, async (c) => {
+  try {
+    const config = await getLiveKitConfig(c.env.KV_CONFIG);
+    if (!config) {
+      return c.json({ error: 'LiveKit is not configured. Add credentials to KV.' }, 503);
+    }
+
+    const body = await c.req.json();
+    const { room, identity, name, canPublish, canAdmin } = body;
+
+    if (!room) {
+      return c.json({ error: 'room is required' }, 400);
+    }
+
+    const authRole = c.get('authRole');
+    const instructorId = authRole === 'admin' ? c.req.query('instructorId')! : c.get('instructorId');
+    const participantIdentity = identity || instructorId || 'instructor';
+    const isAdmin = canAdmin !== undefined ? canAdmin : true;
+    const canPub = canPublish !== undefined ? canPublish : true;
+
+    const token = await generateLiveKitToken({
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+      identity: participantIdentity,
+      name: name || '',
+      room,
+      canPublish: canPub,
+      canSubscribe: true,
+      canPublishData: true,
+      canAdmin: isAdmin,
+      ttl: 6 * 60 * 60,
+    });
+
+    return c.json({
+      success: true,
+      token,
+      url: config.url,
+      room,
+      identity: participantIdentity,
+    });
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 500);
+  }
+});
+
+// POST /livekit/webhook — Receive LiveKit webhook events
+// LiveKit sends webhooks for room events (participant joined, room finished, etc.)
+// This endpoint verifies the webhook signature and updates the database
+instructorRoutes.post('/livekit/webhook', async (c) => {
+  try {
+    const config = await getLiveKitConfig(c.env.KV_CONFIG);
+    if (!config) {
+      return c.json({ error: 'LiveKit not configured' }, 503);
+    }
+
+    const body = await c.req.text();
+
+    // Verify webhook signature
+    const payload = await verifyLiveKitWebhook(body, config.apiSecret);
+    if (!payload) {
+      return c.json({ error: 'Invalid webhook signature' }, 401);
+    }
+
+    const event = payload.event as string;
+    const room = payload.room as Record<string, unknown> | undefined;
+    const now = new Date().toISOString();
+
+    // Handle room events
+    if (room) {
+      const roomName = room.name as string;
+
+      switch (event) {
+        case 'room_finished':
+          // Update schedule status to completed when room ends
+          await c.env.DB.prepare(
+            "UPDATE live_class_schedules SET status = 'completed', updated_at = ? WHERE meeting_url LIKE ? AND is_active = 1"
+          ).bind(now, `%${roomName}%`).run();
+          break;
+
+        case 'room_started':
+          // Update schedule status to live when room starts
+          await c.env.DB.prepare(
+            "UPDATE live_class_schedules SET status = 'live', updated_at = ? WHERE meeting_url LIKE ? AND is_active = 1"
+          ).bind(now, `%${roomName}%`).run();
+          break;
+
+        case 'participant_joined':
+          // Could track participant join events for analytics
+          break;
+
+        case 'participant_left':
+          // Could track participant leave events
+          break;
+      }
+    }
+
+    return c.json({ success: true, event });
+  } catch (error) {
+    return c.json({ error: getErrorMessage(error) }, 500);
+  }
+});
+
+// GET /livekit/config — Get LiveKit public config (URL only, no secrets)
+instructorRoutes.get('/livekit/config', instructorOrAdminMiddleware, async (c) => {
+  try {
+    const config = await getLiveKitConfig(c.env.KV_CONFIG);
+    if (!config) {
+      return c.json({ configured: false, url: null });
+    }
+    return c.json({ configured: true, url: config.url });
   } catch (error) {
     return c.json({ error: getErrorMessage(error) }, 500);
   }
