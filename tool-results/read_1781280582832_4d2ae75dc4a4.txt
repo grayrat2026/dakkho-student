@@ -1,0 +1,502 @@
+     1→     1→     1→'use client';
+     2→     2→     2→
+     3→     3→     3→import { useState, useMemo, useCallback } from 'react';
+     4→     4→     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→     5→     5→import {
+     6→     6→     6→  Plus, ChevronDown, ChevronRight, Trash2, Edit3, GripVertical,
+     7→     7→     7→  FolderOpen, FileText, Video, Link as LinkIcon, X, Upload, Save,
+     8→     8→     8→  BookOpen, Play, Eye, MoreVertical, Check, Search, AlertTriangle,
+     9→     9→     9→  Image as ImageIcon,
+    10→    10→    10→} from 'lucide-react';
+    11→    11→    11→import { toast } from 'sonner';
+    12→    12→    12→import { GlassCard } from '@/components/shared/GlassCard';
+    13→    13→    13→import { GradientButton } from '@/components/shared/GradientButton';
+    14→    14→    14→import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
+    15→    15→    15→import { EmptyState } from '@/components/shared/EmptyState';
+    16→    16→    16→import {
+    17→    17→    17→  useCurriculum, useCourseSubjects, useSubjects, useTechnologies,
+    18→    18→    18→  useCreateChapter, useUpdateChapter, useDeleteChapter,
+    19→    19→    19→  useCreateLesson, useUpdateLesson, useDeleteLesson,
+    20→    20→    20→  useAddSubjectToCourse, useRemoveSubjectFromCourse,
+    21→    21→    21→  useUploadResource, useResources,
+    22→    22→    22→  useUploadVideo, useCourse,
+    23→    23→    23→} from '@/lib/api-hooks';
+    24→    24→    24→import { useNavigationStore } from '@/lib/store';
+    25→    25→    25→import { cn, formatDurationShort } from '@/lib/utils';
+    26→    26→    26→import { staggerChildren } from '@/lib/animations';
+    27→    27→    27→import { apiUpload } from '@/lib/api-client';
+    28→    28→    28→
+    29→    29→    29→// Video duration detector
+    30→    30→    30→function getVideoDuration(file: File): Promise<number> {
+    31→    31→    31→  return new Promise((resolve) => {
+    32→    32→    32→    const video = document.createElement('video');
+    33→    33→    33→    video.preload = 'metadata';
+    34→    34→    34→    video.onloadedmetadata = () => {
+    35→    35→    35→      resolve(Math.round(video.duration));
+    36→    36→    36→      URL.revokeObjectURL(video.src);
+    37→    37→    37→    };
+    38→    38→    38→    video.onerror = () => resolve(0);
+    39→    39→    39→    video.src = URL.createObjectURL(file);
+    40→    40→    40→  });
+    41→    41→    41→}
+    42→    42→    42→
+    43→    43→    43→// ==================== MODAL COMPONENT ====================
+    44→    44→    44→function Modal({ open, onClose, title, children }: {
+    45→    45→    45→  open: boolean;
+    46→    46→    46→  onClose: () => void;
+    47→    47→    47→  title: string;
+    48→    48→    48→  children: React.ReactNode;
+    49→    49→    49→}) {
+    50→    50→    50→  return (
+    51→    51→    51→    <AnimatePresence>
+    52→    52→    52→      {open && (
+    53→    53→    53→        <motion.div
+    54→    54→    54→          initial={{ opacity: 0 }}
+    55→    55→    55→          animate={{ opacity: 1 }}
+    56→    56→    56→          exit={{ opacity: 0 }}
+    57→    57→    57→          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto p-4"
+    58→    58→    58→          onClick={onClose}
+    59→    59→    59→        >
+    60→    60→    60→          <motion.div
+    61→    61→    61→            initial={{ scale: 0.95, y: 20 }}
+    62→    62→    62→            animate={{ scale: 1, y: 0 }}
+    63→    63→    63→            exit={{ scale: 0.95, y: 20 }}
+    64→    64→    64→            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+    65→    65→    65→            onClick={(e) => e.stopPropagation()}
+    66→    66→    66→            className="w-full max-w-xl"
+    67→    67→    67→          >
+    68→    68→    68→            <GlassCard className="p-6 max-h-[90vh] overflow-y-auto">
+    69→    69→    69→              <div className="flex items-center justify-between mb-5 sticky top-0 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md rounded-t-2xl py-1 -mt-1 -mx-1 px-6 z-20">
+    70→    70→    70→                <h3 className="text-lg font-bold gradient-text">{title}</h3>
+    71→    71→    71→                <button onClick={onClose} className="w-9 h-9 rounded-xl bg-muted/50 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex-shrink-0">
+    72→    72→    72→                  <X className="w-5 h-5" />
+    73→    73→    73→                </button>
+    74→    74→    74→              </div>
+    75→    75→    75→              {children}
+    76→    76→    76→            </GlassCard>
+    77→    77→    77→          </motion.div>
+    78→    78→    78→        </motion.div>
+    79→    79→    79→      )}
+    80→    80→    80→    </AnimatePresence>
+    81→    81→    81→  );
+    82→    82→    82→}
+    83→    83→    83→
+    84→    84→    84→export function CourseCurriculum() {
+    85→    85→    85→  const params = useNavigationStore((s) => s.params);
+    86→    86→    86→  const courseId = params.courseId || '';
+    87→    87→    87→
+    88→    88→    88→  const { data: courseData, loading: courseLoading } = useCourse(courseId);
+    89→    89→    89→  const { data: curriculumData, loading: curriculumLoading, refetch: refetchCurriculum } = useCurriculum(courseId);
+    90→    90→    90→  const { data: courseSubjectsData, refetch: refetchCourseSubjects } = useCourseSubjects(courseId);
+    91→    91→    91→  const { data: resourcesData, refetch: refetchResources } = useResources(courseId);
+    92→    92→    92→  const { data: techData } = useTechnologies();
+    93→    93→    93→
+    94→    94→    94→  const course = courseData?.course || courseData;
+    95→    95→    95→  const technologies = techData?.technologies || [];
+    96→    96→    96→
+    97→    97→    97→  const curriculum = useMemo(() => curriculumData?.curriculum || curriculumData || { subjects: [], chapters: [], lessons: [], resources: [] }, [curriculumData]);
+    98→    98→    98→  const courseSubjects = useMemo(() => courseSubjectsData?.subjects || [], [courseSubjectsData]);
+    99→    99→    99→  const resources = useMemo(() => resourcesData?.resources || [], [resourcesData]);
+   100→   100→   100→
+   101→   101→   101→  const subjects = useMemo(
+   102→   102→   102→    () => courseSubjects.length > 0 ? courseSubjects : (curriculum.subjects || []),
+   103→   103→   103→    [courseSubjects, curriculum.subjects]
+   104→   104→   104→  );
+   105→   105→   105→
+   106→   106→   106→  const { mutate: createChapter, loading: creatingChapter } = useCreateChapter(courseId);
+   107→   107→   107→  const { mutate: updateChapter } = useUpdateChapter(courseId);
+   108→   108→   108→  const { mutate: deleteChapter } = useDeleteChapter(courseId);
+   109→   109→   109→  const { mutate: createLesson, loading: creatingLesson } = useCreateLesson(courseId);
+   110→   110→   110→  const { mutate: updateLesson } = useUpdateLesson(courseId);
+   111→   111→   111→  const { mutate: deleteLesson } = useDeleteLesson(courseId);
+   112→   112→   112→  const { mutate: addSubject } = useAddSubjectToCourse(courseId);
+   113→   113→   113→  const { mutate: removeSubject } = useRemoveSubjectFromCourse(courseId);
+   114→   114→   114→  const { upload: uploadResource, uploadProgress: resourceUploadProgress, loading: uploadingResource } = useUploadResource(courseId);
+   115→   115→   115→  const { upload: uploadVideo, uploadProgress: videoUploadProgress, loading: uploadingVideo } = useUploadVideo(courseId);
+   116→   116→   116→
+   117→   117→   117→  // ===== MODAL STATES =====
+   118→   118→   118→  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
+   119→   119→   119→  const [showNewChapterModal, setShowNewChapterModal] = useState<string | null>(null); // subjectId
+   120→   120→   120→  const [showNewLessonModal, setShowNewLessonModal] = useState<string | null>(null); // chapterId
+   121→   121→   121→  const [showEditChapterModal, setShowEditChapterModal] = useState<string | null>(null); // chapterId
+   122→   122→   122→
+   123→   123→   123→  // New chapter form
+   124→   124→   124→  const [newChapterTitle, setNewChapterTitle] = useState('');
+   125→   125→   125→  const [newChapterDesc, setNewChapterDesc] = useState('');
+   126→   126→   126→
+   127→   127→   127→  // New lesson form
+   128→   128→   128→  const [newLessonTitle, setNewLessonTitle] = useState('');
+   129→   129→   129→  const [newLessonType, setNewLessonType] = useState<'video' | 'link' | 'youtube' | 'document'>('video');
+   130→   130→   130→  const [newLessonDuration, setNewLessonDuration] = useState('');
+   131→   131→   131→  const [newLessonIsPreview, setNewLessonIsPreview] = useState(false);
+   132→   132→   132→  const [videoFile, setVideoFile] = useState<File | null>(null);
+   133→   133→   133→  const [videoThumbnail, setVideoThumbnail] = useState<File | null>(null);
+   134→   134→   134→  const [ccFile, setCcFile] = useState<File | null>(null);
+   135→   135→   135→
+   136→   136→   136→  // Add subject modal
+   137→   137→   137→  const [selectedTechs, setSelectedTechs] = useState<Set<number>>(new Set());
+   138→   138→   138→  const [selectedSemesters, setSelectedSemesters] = useState<Set<string>>(new Set());
+   139→   139→   139→  const [subjectSearchQuery, setSubjectSearchQuery] = useState('');
+   140→   140→   140→  const { data: availableSubjectsData } = useSubjects();
+   141→   141→   141→  const allAvailableSubjects = availableSubjectsData?.subjects || [];
+   142→   142→   142→
+   143→   143→   143→  // Edit chapter
+   144→   144→   144→  const [editChapterTitle, setEditChapterTitle] = useState('');
+   145→   145→   145→  const [editChapterDesc, setEditChapterDesc] = useState('');
+   146→   146→   146→
+   147→   147→   147→  // Track which subject the new lesson belongs to
+   148→   148→   148→  const [newLessonSubjectId, setNewLessonSubjectId] = useState<number>(0);
+   149→   149→   149→
+   150→   150→   150→  // Group chapters by subject
+   151→   151→   151→  const chaptersBySubject = useMemo(() => {
+   152→   152→   152→    const chapters = curriculum.chapters || [];
+   153→   153→   153→    const map = new Map<number, any[]>();
+   154→   154→   154→    chapters.forEach((ch: any) => {
+   155→   155→   155→      const sid = ch.subjectId || ch.subject_id || 0;
+   156→   156→   156→      if (!map.has(sid)) map.set(sid, []);
+   157→   157→   157→      map.get(sid)!.push(ch);
+   158→   158→   158→    });
+   159→   159→   159→    map.forEach((chs) => chs.sort((a: any, b: any) => (a.sortOrder || a.sort_order || 0) - (b.sortOrder || b.sort_order || 0)));
+   160→   160→   160→    return map;
+   161→   161→   161→  }, [curriculum]);
+   162→   162→   162→
+   163→   163→   163→  const getLessonsForChapter = useCallback((chapterId: string) => {
+   164→   164→   164→    const lessons = curriculum.lessons || [];
+   165→   165→   165→    return lessons
+   166→   166→   166→      .filter((l: any) => (l.chapterId || l.chapter_id) === chapterId)
+   167→   167→   167→      .sort((a: any, b: any) => (a.sortOrder || a.sort_order || 0) - (b.sortOrder || b.sort_order || 0));
+   168→   168→   168→  }, [curriculum]);
+   169→   169→   169→
+   170→   170→   170→  const getSubjectName = (subject: any) => subject.name || subject.subjectName || subject.subject_name || 'Unnamed';
+   171→   171→   171→  const getSubjectId = (subject: any) => subject.id || subject.subjectId || subject.subject_id;
+   172→   172→   172→  const getSubjectSemester = (subject: any) => subject.semester || subject.semesterName || '';
+   173→   173→   173→  const getSubjectTechId = (subject: any) => subject.technologyId || subject.technology_id;
+   174→   174→   174→
+   175→   175→   175→  const availableSemesters = useMemo(() => {
+   176→   176→   176→    const semSet = new Set<string>();
+   177→   177→   177→    allAvailableSubjects.forEach((s: any) => {
+   178→   178→   178→      const techId = getSubjectTechId(s);
+   179→   179→   179→      if (selectedTechs.size === 0 || selectedTechs.has(techId)) {
+   180→   180→   180→        const sem = getSubjectSemester(s);
+   181→   181→   181→        if (sem) semSet.add(sem);
+   182→   182→   182→      }
+   183→   183→   183→    });
+   184→   184→   184→    return Array.from(semSet).sort();
+   185→   185→   185→  }, [allAvailableSubjects, selectedTechs]);
+   186→   186→   186→
+   187→   187→   187→  const filteredAvailableSubjects = useMemo(() => {
+   188→   188→   188→    const addedIds = new Set(subjects.map((s: any) => getSubjectId(s)));
+   189→   189→   189→    return allAvailableSubjects.filter((s: any) => {
+   190→   190→   190→      const techId = getSubjectTechId(s);
+   191→   191→   191→      const sem = getSubjectSemester(s);
+   192→   192→   192→      const id = getSubjectId(s);
+   193→   193→   193→      if (selectedTechs.size > 0 && !selectedTechs.has(techId)) return false;
+   194→   194→   194→      if (selectedSemesters.size > 0 && sem && !selectedSemesters.has(sem)) return false;
+   195→   195→   195→      if (subjectSearchQuery) {
+   196→   196→   196→        const name = getSubjectName(s).toLowerCase();
+   197→   197→   197→        if (!name.includes(subjectSearchQuery.toLowerCase())) return false;
+   198→   198→   198→      }
+   199→   199→   199→      if (addedIds.has(id)) return false;
+   200→   200→   200→      return true;
+   201→   201→   201→    });
+   202→   202→   202→  }, [allAvailableSubjects, selectedTechs, selectedSemesters, subjectSearchQuery, subjects]);
+   203→   203→   203→
+   204→   204→   204→  const handleVideoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   205→   205→   205→    const file = e.target.files?.[0];
+   206→   206→   206→    if (file) {
+   207→   207→   207→      setVideoFile(file);
+   208→   208→   208→      const duration = await getVideoDuration(file);
+   209→   209→   209→      if (duration > 0) {
+   210→   210→   210→        const minutes = Math.floor(duration / 60);
+   211→   211→   211→        const seconds = duration % 60;
+   212→   212→   212→        setNewLessonDuration(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+   213→   213→   213→      }
+   214→   214→   214→    }
+   215→   215→   215→  };
+   216→   216→   216→
+   217→   217→   217→  const handleAddSubject = async (subjectId: number) => {
+   218→   218→   218→    const result = await addSubject({ subjectId });
+   219→   219→   219→    if (result) {
+   220→   220→   220→      toast.success('Subject added to course');
+   221→   221→   221→      refetchCourseSubjects();
+   222→   222→   222→      refetchCurriculum();
+   223→   223→   223→    } else {
+   224→   224→   224→      toast.error('Failed to add subject');
+   225→   225→   225→    }
+   226→   226→   226→  };
+   227→   227→   227→
+   228→   228→   228→  const handleRemoveSubject = async (subjectId: number) => {
+   229→   229→   229→    const result = await removeSubject({ subjectId });
+   230→   230→   230→    if (result !== null) {
+   231→   231→   231→      toast.success('Subject removed');
+   232→   232→   232→      refetchCourseSubjects();
+   233→   233→   233→      refetchCurriculum();
+   234→   234→   234→    }
+   235→   235→   235→  };
+   236→   236→   236→
+   237→   237→   237→  // Open new chapter modal
+   238→   238→   238→  const openNewChapterModal = (subjectId: number) => {
+   239→   239→   239→    setShowNewChapterModal(String(subjectId));
+   240→   240→   240→    setNewChapterTitle('');
+   241→   241→   241→    setNewChapterDesc('');
+   242→   242→   242→  };
+   243→   243→   243→
+   244→   244→   244→  const handleCreateChapter = async () => {
+   245→   245→   245→    if (!newChapterTitle.trim()) {
+   246→   246→   246→      toast.error('Please enter a chapter title');
+   247→   247→   247→      return;
+   248→   248→   248→    }
+   249→   249→   249→    const subjectId = Number(showNewChapterModal);
+   250→   250→   250→    const chapters = chaptersBySubject.get(subjectId) || [];
+   251→   251→   251→    const result = await createChapter({
+   252→   252→   252→      title: newChapterTitle.trim(),
+   253→   253→   253→      subjectId,
+   254→   254→   254→      description: newChapterDesc.trim() || undefined,
+   255→   255→   255→      sortOrder: chapters.length + 1,
+   256→   256→   256→    });
+   257→   257→   257→    if (result) {
+   258→   258→   258→      toast.success('Chapter created');
+   259→   259→   259→      setShowNewChapterModal(null);
+   260→   260→   260→      refetchCurriculum();
+   261→   261→   261→    } else {
+   262→   262→   262→      toast.error('Failed to create chapter');
+   263→   263→   263→    }
+   264→   264→   264→  };
+   265→   265→   265→
+   266→   266→   266→  const handleDeleteChapter = async (chapterId: string) => {
+   267→   267→   267→    const result = await deleteChapter({ chapterId });
+   268→   268→   268→    if (result !== null) {
+   269→   269→   269→      toast.success('Chapter deleted');
+   270→   270→   270→      refetchCurriculum();
+   271→   271→   271→    }
+   272→   272→   272→  };
+   273→   273→   273→
+   274→   274→   274→  const openEditChapterModal = (chapter: any) => {
+   275→   275→   275→    setShowEditChapterModal(chapter.id);
+   276→   276→   276→    setEditChapterTitle(chapter.title);
+   277→   277→   277→    setEditChapterDesc(chapter.description || chapter.desc || '');
+   278→   278→   278→  };
+   279→   279→   279→
+   280→   280→   280→  const handleUpdateChapter = async () => {
+   281→   281→   281→    if (!editChapterTitle.trim() || !showEditChapterModal) return;
+   282→   282→   282→    const result = await updateChapter({ chapterId: showEditChapterModal, title: editChapterTitle.trim(), description: editChapterDesc.trim() || undefined });
+   283→   283→   283→    if (result) {
+   284→   284→   284→      toast.success('Chapter updated');
+   285→   285→   285→      setShowEditChapterModal(null);
+   286→   286→   286→      refetchCurriculum();
+   287→   287→   287→    }
+   288→   288→   288→  };
+   289→   289→   289→
+   290→   290→   290→  // Open new lesson modal
+   291→   291→   291→  const openNewLessonModal = (chapterId: string, subjectId: number) => {
+   292→   292→   292→    setShowNewLessonModal(chapterId);
+   293→   293→   293→    setNewLessonSubjectId(subjectId);
+   294→   294→   294→    setNewLessonTitle('');
+   295→   295→   295→    setNewLessonType('video');
+   296→   296→   296→    setNewLessonDuration('');
+   297→   297→   297→    setNewLessonIsPreview(false);
+   298→   298→   298→    setVideoFile(null);
+   299→   299→   299→    setVideoThumbnail(null);
+   300→   300→   300→    setCcFile(null);
+   301→   301→   301→  };
+   302→   302→   302→
+   303→   303→   303→  const handleCreateLesson = async () => {
+   304→   304→   304→    if (!newLessonTitle.trim()) {
+   305→   305→   305→      toast.error('Please enter a lesson title');
+   306→   306→   306→      return;
+   307→   307→   307→    }
+   308→   308→   308→    const chapterId = showNewLessonModal!;
+   309→   309→   309→
+   310→   310→   310→    // If video file selected, upload first
+   311→   311→   311→    if (videoFile) {
+   312→   312→   312→      const fd = new FormData();
+   313→   313→   313→      fd.append('video', videoFile);
+   314→   314→   314→      fd.append('title', newLessonTitle.trim());
+   315→   315→   315→      fd.append('lesson_type', newLessonType);
+   316→   316→   316→      if (videoThumbnail) fd.append('thumbnail', videoThumbnail);
+   317→   317→   317→      if (ccFile) fd.append('cc_file', ccFile);
+   318→   318→   318→
+   319→   319→   319→      const durationParts = newLessonDuration.split(':');
+   320→   320→   320→      let durationSec = 0;
+   321→   321→   321→      if (durationParts.length === 2) {
+   322→   322→   322→        durationSec = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+   323→   323→   323→      } else {
+   324→   324→   324→        durationSec = parseInt(newLessonDuration) || 0;
+   325→   325→   325→      }
+   326→   326→   326→      fd.append('duration', String(durationSec));
+   327→   327→   327→      fd.append('is_preview', String(newLessonIsPreview));
+   328→   328→   328→
+   329→   329→   329→      const result = await uploadVideo(fd);
+   330→   330→   330→      if (result) {
+   331→   331→   331→        toast.success('Video uploaded & lesson created');
+   332→   332→   332→        setShowNewLessonModal(null);
+   333→   333→   333→        refetchCurriculum();
+   334→   334→   334→      } else {
+   335→   335→   335→        toast.error('Video upload failed');
+   336→   336→   336→      }
+   337→   337→   337→      return;
+   338→   338→   338→    }
+   339→   339→   339→
+   340→   340→   340→    const durationParts = newLessonDuration.split(':');
+   341→   341→   341→    let durationSec = 0;
+   342→   342→   342→    if (durationParts.length === 2) {
+   343→   343→   343→      durationSec = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+   344→   344→   344→    } else {
+   345→   345→   345→      durationSec = parseInt(newLessonDuration) || 0;
+   346→   346→   346→    }
+   347→   347→   347→
+   348→   348→   348→    const result = await createLesson({
+   349→   349→   349→      title: newLessonTitle.trim(),
+   350→   350→   350→      chapterId,
+   351→   351→   351→      subjectId: newLessonSubjectId,
+   352→   352→   352→      lessonType: newLessonType,
+   353→   353→   353→      duration: durationSec || undefined,
+   354→   354→   354→      isPreview: newLessonIsPreview,
+   355→   355→   355→    });
+   356→   356→   356→    if (result) {
+   357→   357→   357→      toast.success('Lesson created');
+   358→   358→   358→      setShowNewLessonModal(null);
+   359→   359→   359→      refetchCurriculum();
+   360→   360→   360→    } else {
+   361→   361→   361→      toast.error('Failed to create lesson');
+   362→   362→   362→    }
+   363→   363→   363→  };
+   364→   364→   364→
+   365→   365→   365→  const handleDeleteLesson = async (lessonId: string) => {
+   366→   366→   366→    const result = await deleteLesson({ lessonId });
+   367→   367→   367→    if (result !== null) {
+   368→   368→   368→      toast.success('Lesson deleted');
+   369→   369→   369→      refetchCurriculum();
+   370→   370→   370→    }
+   371→   371→   371→  };
+   372→   372→   372→
+   373→   373→   373→  const handleUploadResource = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   374→   374→   374→    const file = e.target.files?.[0];
+   375→   375→   375→    if (!file) return;
+   376→   376→   376→    const fd = new FormData();
+   377→   377→   377→    fd.append('file', file);
+   378→   378→   378→    fd.append('title', file.name);
+   379→   379→   379→    const result = await uploadResource(fd);
+   380→   380→   380→    if (result) {
+   381→   381→   381→      toast.success('Resource uploaded');
+   382→   382→   382→      refetchResources();
+   383→   383→   383→    } else {
+   384→   384→   384→      toast.error('Upload failed');
+   385→   385→   385→    }
+   386→   386→   386→  };
+   387→   387→   387→
+   388→   388→   388→  const handleDeleteResource = async (resourceId: string) => {
+   389→   389→   389→    const { apiDelete } = await import('@/lib/api-client');
+   390→   390→   390→    try {
+   391→   391→   391→      await apiDelete(`/courses/${courseId}/resources/${resourceId}`);
+   392→   392→   392→      toast.success('Resource deleted');
+   393→   393→   393→      refetchResources();
+   394→   394→   394→    } catch {
+   395→   395→   395→      toast.error('Failed to delete resource');
+   396→   396→   396→    }
+   397→   397→   397→  };
+   398→   398→   398→
+   399→   399→   399→  if (curriculumLoading || courseLoading) {
+   400→   400→   400→    return <LoadingSkeleton type="card" count={3} />;
+   401→   401→   401→  }
+   402→   402→   402→
+   403→   403→   403→  return (
+   404→   404→   404→    <div className="space-y-6">
+   405→   405→   405→      {/* Header */}
+   406→   406→   406→      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+   407→   407→   407→        <div className="flex items-center justify-between gap-4">
+   408→   408→   408→          <div>
+   409→   409→   409→            <h1 className="text-2xl md:text-3xl font-extrabold text-foreground">
+   410→   410→   410→              Course <span className="gradient-text">Curriculum</span>
+   411→   411→   411→            </h1>
+   412→   412→   412→            <p className="text-muted-foreground mt-1 text-sm">
+   413→   413→   413→              {course?.title || 'Manage curriculum structure'}
+   414→   414→   414→            </p>
+   415→   415→   415→          </div>
+   416→   416→   416→          <GradientButton size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => { setShowAddSubjectModal(true); setSelectedTechs(new Set()); setSelectedSemesters(new Set()); setSubjectSearchQuery(''); }}>
+   417→   417→   417→            Add Subject
+   418→   418→   418→          </GradientButton>
+   419→   419→   419→        </div>
+   420→   420→   420→      </motion.div>
+   421→   421→   421→
+   422→   422→   422→      {/* Course Subjects & Chapters */}
+   423→   423→   423→      {subjects.length === 0 ? (
+   424→   424→   424→        <EmptyState
+   425→   425→   425→          icon={FolderOpen}
+   426→   426→   426→          title="No subjects yet"
+   427→   427→   427→          description="Add subjects to organize your course content by topics"
+   428→   428→   428→          actionLabel="Add Subject"
+   429→   429→   429→          onAction={() => setShowAddSubjectModal(true)}
+   430→   430→   430→        />
+   431→   431→   431→      ) : (
+   432→   432→   432→        <div className="space-y-4">
+   433→   433→   433→          {subjects.map((subject: any, si: number) => {
+   434→   434→   434→            const subjectChapters = chaptersBySubject.get(getSubjectId(subject)) || [];
+   435→   435→   435→            return (
+   436→   436→   436→              <motion.div key={getSubjectId(subject) || si} {...staggerChildren(si, 0.04)}>
+   437→   437→   437→                <GlassCard className="overflow-hidden" glow>
+   438→   438→   438→                  {/* Subject Header */}
+   439→   439→   439→                  <div className="p-4 md:p-5 border-b border-black/[0.03] dark:border-white/[0.03] flex items-center justify-between">
+   440→   440→   440→                    <div className="flex items-center gap-3">
+   441→   441→   441→                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-black dark:from-white dark:via-neutral-200 dark:to-white flex items-center justify-center flex-shrink-0 shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
+   442→   442→   442→                        <BookOpen className="w-5 h-5 text-white dark:text-neutral-900" />
+   443→   443→   443→                      </div>
+   444→   444→   444→                      <div>
+   445→   445→   445→                        <h3 className="font-bold text-foreground">{getSubjectName(subject)}</h3>
+   446→   446→   446→                        <p className="text-xs text-muted-foreground">{subjectChapters.length} chapters</p>
+   447→   447→   447→                      </div>
+   448→   448→   448→                    </div>
+   449→   449→   449→                    <div className="flex items-center gap-2">
+   450→   450→   450→                      <GradientButton size="sm" variant="ghost" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => openNewChapterModal(getSubjectId(subject))}>
+   451→   451→   451→                        Chapter
+   452→   452→   452→                      </GradientButton>
+   453→   453→   453→                      <button
+   454→   454→   454→                        onClick={() => handleRemoveSubject(getSubjectId(subject))}
+   455→   455→   455→                        className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+   456→   456→   456→                      >
+   457→   457→   457→                        <Trash2 className="w-3.5 h-3.5" />
+   458→   458→   458→                      </button>
+   459→   459→   459→                    </div>
+   460→   460→   460→                  </div>
+   461→   461→   461→
+   462→   462→   462→                  {/* Chapters */}
+   463→   463→   463→                  <div className="divide-y divide-black/[0.03] dark:divide-white/[0.03]">
+   464→   464→   464→                    {subjectChapters.map((chapter: any, ci: number) => {
+   465→   465→   465→                      const chapterLessons = getLessonsForChapter(chapter.id);
+   466→   466→   466→                      return (
+   467→   467→   467→                        <ChapterSection
+   468→   468→   468→                          key={chapter.id}
+   469→   469→   469→                          chapter={chapter}
+   470→   470→   470→                          lessons={chapterLessons}
+   471→   471→   471→                          courseId={courseId}
+   472→   472→   472→                          onDeleteChapter={handleDeleteChapter}
+   473→   473→   473→                          onEditChapter={openEditChapterModal}
+   474→   474→   474→                          onDeleteLesson={handleDeleteLesson}
+   475→   475→   475→                          onAddLesson={(chapterId, subjectId) => openNewLessonModal(chapterId, subjectId)}
+   476→   476→   476→                          subjectId={getSubjectId(subject)}
+   477→   477→   477→                        />
+   478→   478→   478→                      );
+   479→   479→   479→                    })}
+   480→   480→   480→                    {subjectChapters.length === 0 && (
+   481→   481→   481→                      <div className="p-6 text-center">
+   482→   482→   482→                        <p className="text-sm text-muted-foreground">No chapters yet</p>
+   483→   483→   483→                        <GradientButton size="sm" variant="ghost" className="mt-2" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => openNewChapterModal(getSubjectId(subject))}>
+   484→   484→   484→                          Add First Chapter
+   485→   485→   485→                        </GradientButton>
+   486→   486→   486→                      </div>
+   487→   487→   487→                    )}
+   488→   488→   488→                  </div>
+   489→   489→   489→                </GlassCard>
+   490→   490→   490→              </motion.div>
+   491→   491→   491→            );
+   492→   492→   492→          })}
+   493→   493→   493→        </div>
+   494→   494→   494→      )}
+   495→   495→   495→
+   496→   496→   496→      {/* Resources Section */}
+   497→   497→   497→      <motion.div {...staggerChildren(subjects.length, 0.04)}>
+   498→   498→   498→        <GlassCard className="p-5" glow>
+   499→   499→   499→          <div className="flex items-center justify-between mb-4">
+   500→   500→   500→            <div className="flex items-center gap-3">
+
+[showing lines 1-500 of 1029; use offset=501 with limit to continue reading]
