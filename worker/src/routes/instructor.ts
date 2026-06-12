@@ -1343,6 +1343,7 @@ instructorRoutes.delete('/courses/:id', instructorOrAdminMiddleware, async (c) =
       'DELETE FROM course_subjects WHERE course_id = ?',
       'DELETE FROM course_learning_points WHERE course_id = ?',
       'DELETE FROM course_packages WHERE course_id = ?',
+      'DELETE FROM watch_progress WHERE course_id = ?',
     ];
 
     for (const sql of relatedTables) {
@@ -1350,6 +1351,13 @@ instructorRoutes.delete('/courses/:id', instructorOrAdminMiddleware, async (c) =
         await c.env.DB.prepare(sql).bind(courseId).run();
       } catch {}
     }
+
+    // Cancel and deactivate all related live classes (soft delete)
+    try {
+      await c.env.DB.prepare(
+        "UPDATE live_class_schedules SET status = 'cancelled', is_active = 0, updated_at = datetime('now') WHERE course_id = ? AND is_active = 1"
+      ).bind(courseId).run();
+    } catch {}
 
     // Delete the course itself
     await c.env.DB.prepare('DELETE FROM courses WHERE id = ?').bind(courseId).run();

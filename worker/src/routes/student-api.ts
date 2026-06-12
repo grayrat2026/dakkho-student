@@ -233,9 +233,16 @@ studentApiRoutes.get('/events', async (c) => {
 
 studentApiRoutes.get('/live-classes', async (c) => {
   try {
-    const result = await c.env.DB.prepare(
-      "SELECT * FROM live_class_schedules WHERE is_active = 1 AND status IN ('scheduled', 'live') ORDER BY scheduled_at ASC"
-    ).all();
+    // Only show live classes for published, existing courses
+    // or standalone classes (no course_id)
+    const result = await c.env.DB.prepare(`
+      SELECT lcs.* FROM live_class_schedules lcs
+      LEFT JOIN courses c ON lcs.course_id = c.id
+      WHERE lcs.is_active = 1
+        AND lcs.status IN ('scheduled', 'live')
+        AND (lcs.course_id IS NULL OR (c.id IS NOT NULL AND c.is_published = 1))
+      ORDER BY lcs.scheduled_at ASC
+    `).all();
 
     return c.json({ liveClasses: result.results });
   } catch (error) {
@@ -270,8 +277,8 @@ studentApiRoutes.get('/live-classes/:id/livekit-token', studentAuthMiddleware, a
     // Verify student is enrolled in the course
     if (s.course_id) {
       const enrollment = await c.env.DB.prepare(
-        'SELECT id FROM enrollments WHERE student_id = ? AND course_id = ? AND status = ?'
-      ).bind(studentId, s.course_id, 'active').first();
+        'SELECT id FROM enrollments WHERE user_id = ? AND course_id = ?'
+      ).bind(studentId, s.course_id).first();
 
       if (!enrollment) {
         return c.json({ error: 'You must be enrolled in this course to join the live class' }, 403);
@@ -286,11 +293,11 @@ studentApiRoutes.get('/live-classes/:id/livekit-token', studentAuthMiddleware, a
     // Extract room name from meeting_url
     const roomName = s.meeting_url?.replace('livekit://', '') || `dakkho-class-${s.id}`;
 
-    // Get student name for display
+    // Get student name for display (from users table, not students table)
     const student = await c.env.DB.prepare(
-      'SELECT name FROM students WHERE id = ?'
+      'SELECT full_name FROM users WHERE id = ?'
     ).bind(studentId).first();
-    const studentName = (student as any)?.name || 'Student';
+    const studentName = (student as any)?.full_name || 'Student';
 
     const token = await generateLiveKitToken({
       apiKey: config.apiKey,
@@ -340,8 +347,8 @@ studentApiRoutes.get('/live-classes/:id/calls-session', studentAuthMiddleware, a
     // Verify enrollment
     if (s.course_id) {
       const enrollment = await c.env.DB.prepare(
-        'SELECT id FROM enrollments WHERE student_id = ? AND course_id = ? AND status = ?'
-      ).bind(studentId, s.course_id, 'active').first();
+        'SELECT id FROM enrollments WHERE user_id = ? AND course_id = ?'
+      ).bind(studentId, s.course_id).first();
       if (!enrollment) {
         return c.json({ error: 'You must be enrolled in this course' }, 403);
       }
