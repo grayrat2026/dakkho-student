@@ -141,6 +141,9 @@ npx wrangler pages deploy out --project-name dakkho-student
 - **Semester badge**: Profile page now shows semester badge (e.g. "Sem 3") alongside institute and technology — uses Math.floor to avoid "3.0"
 - **Profile stats API**: `/api/student/profile/stats` now returns `profile` object for pre-filling edit form
 - **OneSignal ServiceWorker fix**: Wrapped importScripts in try-catch to prevent console errors on Cloudflare Pages static export
+- **Search results images**: Instructor avatars and course thumbnails now display in search results instead of placeholder icons
+- **Semester persistence**: Semester now survives page refresh — stored via /auth/me and profile/stats API
+- **Institute name from API**: Login and refreshUser now get institute name directly from /auth/me response
 
 ## 📄 License
 
