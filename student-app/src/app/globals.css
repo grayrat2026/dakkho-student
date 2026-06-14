@@ -3,46 +3,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('https://fonts.gstatic.com/s/nunito/v26/XRXI3I6Li01BKofiOc5tNc-hdC4.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('https://fonts.gstatic.com/s/nunito/v26/XRXI3I6Li01BKofiOc5tNc-hdC4.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('https://fonts.gstatic.com/s/nunito/v26/XRXI3I6Li01BKofiOc5tNc-hdC4.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('https://fonts.gstatic.com/s/nunito/v26/XRXI3I6Li01BKofiOc5tNc-hdC4.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Nunito';
-  font-style: normal;
-  font-weight: 900;
-  font-display: swap;
-  src: url('https://fonts.gstatic.com/s/nunito/v26/XRXI3I6Li01BKofiOc5tNc-hdC4.woff2') format('woff2');
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

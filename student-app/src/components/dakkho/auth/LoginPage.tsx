@@ -199,7 +199,7 @@ export function LoginPage() {
           enrolledCourseIds: [],
         };
         useAuthStore.getState().setUser(user);
-        useAuthStore.getState().set({ user, isAuthenticated: true, isLoading: false });
+        useAuthStore.setState({ isAuthenticated: true, isLoading: false });
       }
 
       // Save remember me
@@ -237,7 +237,8 @@ export function LoginPage() {
           isNewUser: false,
           enrolledCourseIds: [],
         };
-        useAuthStore.getState().set({ user, isAuthenticated: true, isLoading: false });
+        useAuthStore.getState().setUser(user);
+        useAuthStore.setState({ isAuthenticated: true, isLoading: false });
 
         // Save remember me
         if (rememberMe) {

@@ -146,9 +146,11 @@ npx wrangler pages deploy out --project-name dakkho-student
 
 ## 📋 Recent Changes (June 2026)
 
-- **Trending course cards redesign**: Full-poster image cards with minimal mobile UI (title overlay only) and desktop hover micro-animations (image zoom, staggered metadata reveal with category, instructor, rating, students, duration)
+- **Trending course cards — Amazon Prime Video style**: Poster image with metadata alongside (category, title, instructor, rating/students/duration); desktop hover shows image zoom + play button; mobile shows compact info
+- **2FA login fix**: Fixed `a.getState(...).set is not a function` — replaced broken `getState().set()` with `setState()` in login and 2FA verify flows
+- **Nunito font fix**: Removed broken @font-face declarations (404 on gstatic), now loading exclusively via Google Fonts CDN
+- **Google Noto Animated Emoji System**: Auto-detects emojis in text, replaces with animated GIF (inline) or Lottie (featured) from Google CDN with graceful fallback (`EmojiText`, `AnimatedEmoji`, `notoEmoji.ts`)
 - **Custom cursors**: Dark-mode and light-mode custom SVG cursors applied via CSS variables (desktop only, no-touch devices)
-- **Exam tips admin CRUD**: ExamTipsPage fetches from /api/exam-tips endpoint (stored in app_config, editable by admin via D1)
 - **Enrollment status on course detail**: Enrolled users now see "Continue Learning" + "Enrolled ✓" badge instead of "Enroll Now — ৳XXX"
 - **Payment verification by payment_id**: PaymentResultPage now verifies using `payment_id` from URL, fixing the `{pp_id}` placeholder issue
 - **PipraPay natural redirect**: Full-page redirect instead of iframe for better payment gateway compatibility

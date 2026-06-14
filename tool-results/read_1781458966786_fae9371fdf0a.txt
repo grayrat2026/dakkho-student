@@ -1,0 +1,686 @@
+     1→'use client';
+     2→
+     3→import { useState, useEffect, useCallback } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { Eye, EyeOff, Mail, Lock, LogIn, Check, AlertCircle, KeyRound, Shield, Loader2 } from 'lucide-react';
+     6→import { toast } from 'sonner';
+     7→import { useAuthStore, useNavigationStore } from '@/lib/store';
+     8→import { twoFAApi } from '@/lib/api-client';
+     9→import { GlassCard } from '../shared/GlassCard';
+    10→import { GradientButton } from '../shared/GradientButton';
+    11→import { setAuthToken } from '@/lib/api-client';
+    12→import Image from 'next/image';
+    13→
+    14→const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    15→
+    16→const getPasswordStrength = (password: string): { label: string; color: string } => {
+    17→  if (!password) return { label: '', color: '' };
+    18→  let score = 0;
+    19→  if (password.length >= 6) score++;
+    20→  if (password.length >= 8) score++;
+    21→  if (/[A-Z]/.test(password)) score++;
+    22→  if (/[0-9]/.test(password)) score++;
+    23→  if (/[^A-Za-z0-9]/.test(password)) score++;
+    24→
+    25→  if (score <= 1) return { label: 'Weak', color: '#ef4444' };
+    26→  if (score <= 2) return { label: 'Fair', color: '#f59e0b' };
+    27→  if (score <= 3) return { label: 'Good', color: '#eab308' };
+    28→  if (score <= 4) return { label: 'Strong', color: '#10b981' };
+    29→  return { label: 'Very Strong', color: '#059669' };
+    30→};
+    31→
+    32→// Floating blobs for background
+    33→function BackgroundBlobs() {
+    34→  return (
+    35→    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+    36→      <motion.div
+    37→        className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-sky-200/20 dark:bg-sky-800/10 blur-3xl"
+    38→        animate={{
+    39→          y: [0, -30, 0],
+    40→          x: [0, 20, 0],
+    41→          scale: [1, 1.1, 1],
+    42→        }}
+    43→        transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+    44→      />
+    45→      <motion.div
+    46→        className="absolute -bottom-32 -right-20 w-80 h-80 rounded-full bg-blue-200/20 dark:bg-blue-800/10 blur-3xl"
+    47→        animate={{
+    48→          y: [0, 25, 0],
+    49→          x: [0, -20, 0],
+    50→          scale: [1, 1.15, 1],
+    51→        }}
+    52→        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+    53→      />
+    54→      <motion.div
+    55→        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-teal-200/10 dark:bg-teal-800/5 blur-3xl"
+    56→        animate={{
+    57→          scale: [1, 1.2, 1],
+    58→          opacity: [0.3, 0.6, 0.3],
+    59→        }}
+    60→        transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
+    61→      />
+    62→      {/* Small floating particles */}
+    63→      {[...Array(6)].map((_, i) => (
+    64→        <motion.div
+    65→          key={i}
+    66→          className="absolute w-2 h-2 rounded-full bg-sky-300/30 dark:bg-sky-600/20"
+    67→          style={{
+    68→            left: `${15 + i * 15}%`,
+    69→            top: `${20 + (i % 3) * 25}%`,
+    70→          }}
+    71→          animate={{
+    72→            y: [0, -15, 0],
+    73→            opacity: [0.3, 0.8, 0.3],
+    74→          }}
+    75→          transition={{
+    76→            duration: 3 + i * 0.5,
+    77→            repeat: Infinity,
+    78→            ease: 'easeInOut',
+    79→            delay: i * 0.4,
+    80→          }}
+    81→        />
+    82→      ))}
+    83→    </div>
+    84→  );
+    85→}
+    86→
+    87→export function LoginPage() {
+    88→  const [email, setEmail] = useState('');
+    89→  const [password, setPassword] = useState('');
+    90→  const [showPassword, setShowPassword] = useState(false);
+    91→  const [rememberMe, setRememberMe] = useState(false);
+    92→  const [error, setError] = useState('');
+    93→  const [emailFocused, setEmailFocused] = useState(false);
+    94→  const [passwordFocused, setPasswordFocused] = useState(false);
+    95→  const { login, isLoading } = useAuthStore();
+    96→  const navigate = useNavigationStore((s) => s.navigate);
+    97→
+    98→  // 2FA verification state
+    99→  const [requires2FA, setRequires2FA] = useState(false);
+   100→  const [pendingToken, setPendingToken] = useState('');
+   101→  const [totpCode, setTotpCode] = useState('');
+   102→  const [isVerifying2FA, setIsVerifying2FA] = useState(false);
+   103→  const [twoFAError, setTwoFAError] = useState('');
+   104→
+   105→  // Load remembered email (deferred to avoid synchronous setState in effect)
+   106→  useEffect(() => {
+   107→    try {
+   108→      const saved = localStorage.getItem('dakkho-remember-me');
+   109→      if (saved) {
+   110→        const data = JSON.parse(saved);
+   111→        requestAnimationFrame(() => {
+   112→          setEmail(data.email || '');
+   113→          setRememberMe(true);
+   114→        });
+   115→      }
+   116→    } catch {
+   117→      // ignore
+   118→    }
+   119→  }, []);
+   120→
+   121→  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+   122→    e.preventDefault();
+   123→    setError('');
+   124→
+   125→    if (!isValidEmail(email)) {
+   126→      setError('Please enter a valid email address');
+   127→      return;
+   128→    }
+   129→
+   130→    if (password.length < 6) {
+   131→      setError('Password must be at least 6 characters');
+   132→      return;
+   133→    }
+   134→
+   135→    try {
+   136→      await login(email, password);
+   137→      // Save remember me
+   138→      if (rememberMe) {
+   139→        localStorage.setItem('dakkho-remember-me', JSON.stringify({ email }));
+   140→      } else {
+   141→        localStorage.removeItem('dakkho-remember-me');
+   142→      }
+   143→    } catch (err: any) {
+   144→      // Check if the error indicates 2FA is required
+   145→      if (err?.requires2FA) {
+   146→        setRequires2FA(true);
+   147→        setPendingToken(err.pendingToken);
+   148→        return;
+   149→      }
+   150→      setError('Invalid email or password. Please try again.');
+   151→    }
+   152→  }, [email, password, rememberMe, login]);
+   153→
+   154→  // Handle 2FA login - we need to intercept the login response
+   155→  const handleLogin = useCallback(async (e: React.FormEvent) => {
+   156→    e.preventDefault();
+   157→    setError('');
+   158→    setTwoFAError('');
+   159→
+   160→    if (!isValidEmail(email)) {
+   161→      setError('Please enter a valid email address');
+   162→      return;
+   163→    }
+   164→
+   165→    if (password.length < 6) {
+   166→      setError('Password must be at least 6 characters');
+   167→      return;
+   168→    }
+   169→
+   170→    try {
+   171→      // Directly call the login API to check for 2FA
+   172→      const { authApi, setAuthToken } = await import('@/lib/api-client');
+   173→      const res = await authApi.login({ email, password });
+   174→
+   175→      if (res.requires2FA) {
+   176→        // 2FA is required - show verification screen
+   177→        setRequires2FA(true);
+   178→        setPendingToken(res.pendingToken);
+   179→        return;
+   180→      }
+   181→
+   182→      // Normal login flow
+   183→      if (res.success && res.token) {
+   184→        setAuthToken(res.token);
+   185→        // Use the auth store to complete login
+   186→        const { useAuthStore } = await import('@/lib/store');
+   187→        const user = {
+   188→          id: res.user?.id || '',
+   189→          fullName: res.user?.name || '',
+   190→          email: res.user?.email || email,
+   191→          institute: res.user?.instituteName || undefined,
+   192→          instituteId: res.user?.instituteId || undefined,
+   193→          technology: res.user?.technology || undefined,
+   194→          semester: undefined,
+   195→          emailVerified: res.user?.emailVerified || false,
+   196→          avatarUrl: res.user?.avatarUrl || '',
+   197→          role: 'student' as const,
+   198→          isNewUser: false,
+   199→          enrolledCourseIds: [],
+   200→        };
+   201→        useAuthStore.getState().setUser(user);
+   202→        useAuthStore.getState().set({ user, isAuthenticated: true, isLoading: false });
+   203→      }
+   204→
+   205→      // Save remember me
+   206→      if (rememberMe) {
+   207→        localStorage.setItem('dakkho-remember-me', JSON.stringify({ email }));
+   208→      } else {
+   209→        localStorage.removeItem('dakkho-remember-me');
+   210→      }
+   211→    } catch (err: any) {
+   212→      setError(err?.message || 'Invalid email or password. Please try again.');
+   213→    }
+   214→  }, [email, password, rememberMe]);
+   215→
+   216→  const handle2FAVerify = useCallback(async () => {
+   217→    if (totpCode.length !== 6) return;
+   218→    setIsVerifying2FA(true);
+   219→    setTwoFAError('');
+   220→
+   221→    try {
+   222→      const res = await twoFAApi.verifyLogin(pendingToken, totpCode);
+   223→      if (res.success && res.token) {
+   224→        setAuthToken(res.token);
+   225→        const { useAuthStore } = await import('@/lib/store');
+   226→        const user = {
+   227→          id: res.user?.id || '',
+   228→          fullName: res.user?.name || '',
+   229→          email: res.user?.email || email,
+   230→          institute: res.user?.instituteName || undefined,
+   231→          instituteId: res.user?.instituteId || undefined,
+   232→          technology: res.user?.technology || undefined,
+   233→          semester: undefined,
+   234→          emailVerified: res.user?.emailVerified || false,
+   235→          avatarUrl: res.user?.avatarUrl || '',
+   236→          role: 'student' as const,
+   237→          isNewUser: false,
+   238→          enrolledCourseIds: [],
+   239→        };
+   240→        useAuthStore.getState().set({ user, isAuthenticated: true, isLoading: false });
+   241→
+   242→        // Save remember me
+   243→        if (rememberMe) {
+   244→          localStorage.setItem('dakkho-remember-me', JSON.stringify({ email }));
+   245→        } else {
+   246→          localStorage.removeItem('dakkho-remember-me');
+   247→        }
+   248→      }
+   249→    } catch (err: any) {
+   250→      setTwoFAError(err?.message || 'Invalid verification code. Please try again.');
+   251→    } finally {
+   252→      setIsVerifying2FA(false);
+   253→    }
+   254→  }, [pendingToken, totpCode, email, rememberMe]);
+   255→
+   256→  const handleSocialLogin = (provider: string) => {
+   257→    toast.info(`${provider} login coming soon!`, {
+   258→      description: 'We are working on integrating social login providers.',
+   259→      duration: 3000,
+   260→    });
+   261→  };
+   262→
+   263→  const handleOTPLogin = () => {
+   264→    toast.info('OTP login coming soon!', {
+   265→      description: 'Sign in with a one-time password will be available shortly.',
+   266→      duration: 3000,
+   267→    });
+   268→  };
+   269→
+   270→  const emailValid = email && isValidEmail(email);
+   271→  const passwordStrength = getPasswordStrength(password);
+   272→
+   273→  // 2FA Verification Screen
+   274→  if (requires2FA) {
+   275→    return (
+   276→      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-white to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-sky-950 p-4 relative overflow-hidden">
+   277→        <BackgroundBlobs />
+   278→        <motion.div
+   279→          initial={{ opacity: 0, y: 30 }}
+   280→          animate={{ opacity: 1, y: 0 }}
+   281→          transition={{ duration: 0.6 }}
+   282→          className="w-full max-w-md relative z-10"
+   283→        >
+   284→          <GlassCard className="p-6 sm:p-8">
+   285→            {/* Logo */}
+   286→            <motion.div
+   287→              className="flex flex-col items-center mb-8"
+   288→              initial={{ opacity: 0, scale: 0.8 }}
+   289→              animate={{ opacity: 1, scale: 1 }}
+   290→              transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+   291→            >
+   292→              <motion.div
+   293→                className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center mb-3 shadow-lg shadow-sky-500/30"
+   294→                animate={{ rotate: [0, 5, -5, 0] }}
+   295→                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+   296→              >
+   297→                <Image src="/logo.png" alt="DAKKHO" width={40} height={40} className="rounded-xl" />
+   298→              </motion.div>
+   299→              <h1 className="text-2xl font-extrabold gradient-text">Two-Factor Authentication</h1>
+   300→              <p className="text-sm text-muted-foreground mt-1">Enter the code from your authenticator app</p>
+   301→            </motion.div>
+   302→
+   303→            {/* Shield icon */}
+   304→            <div className="flex justify-center mb-6">
+   305→              <div className="w-20 h-20 rounded-2xl bg-sky-50 dark:bg-sky-900/20 flex items-center justify-center border-2 border-sky-200 dark:border-sky-800">
+   306→                <Shield className="w-10 h-10 text-sky-500" />
+   307→              </div>
+   308→            </div>
+   309→
+   310→            {/* Info */}
+   311→            <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 mb-4">
+   312→              <p className="text-xs text-sky-700 dark:text-sky-300 text-center">
+   313→                Open your authenticator app (Google Authenticator, Authy, etc.) and enter the 6-digit code for <strong>{email}</strong>
+   314→              </p>
+   315→            </div>
+   316→
+   317→            {/* Error */}
+   318→            {twoFAError && (
+   319→              <motion.div
+   320→                initial={{ opacity: 0, y: -10 }}
+   321→                animate={{ opacity: 1, y: 0 }}
+   322→                className="mb-4"
+   323→              >
+   324→                <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50">
+   325→                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+   326→                  <p className="text-xs font-medium text-red-600 dark:text-red-400">{twoFAError}</p>
+   327→                </div>
+   328→              </motion.div>
+   329→            )}
+   330→
+   331→            {/* Code input */}
+   332→            <div className="mb-4">
+   333→              <input
+   334→                type="text"
+   335→                inputMode="numeric"
+   336→                pattern="[0-9]*"
+   337→                maxLength={6}
+   338→                value={totpCode}
+   339→                onChange={(e) => {
+   340→                  const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+   341→                  setTotpCode(val);
+   342→                  setTwoFAError('');
+   343→                }}
+   344→                placeholder="Enter 6-digit code"
+   345→                className="w-full px-4 py-4 rounded-xl bg-muted/30 border-2 border-transparent focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 outline-none transition-all text-center text-2xl font-bold tracking-[0.5em] text-foreground"
+   346→                autoFocus
+   347→              />
+   348→            </div>
+   349→
+   350→            {/* Verify button */}
+   351→            <GradientButton
+   352→              onClick={handle2FAVerify}
+   353→              loading={isVerifying2FA}
+   354→              disabled={totpCode.length !== 6}
+   355→              className="w-full"
+   356→              size="lg"
+   357→            >
+   358→              {isVerifying2FA ? (
+   359→                <>
+   360→                  <motion.div
+   361→                    animate={{ rotate: 360 }}
+   362→                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+   363→                    className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+   364→                  />
+   365→                  Verifying...
+   366→                </>
+   367→              ) : (
+   368→                <>
+   369→                  <Shield className="w-4 h-4" />
+   370→                  Verify & Sign In
+   371→                </>
+   372→              )}
+   373→            </GradientButton>
+   374→
+   375→            {/* Back to login */}
+   376→            <div className="text-center mt-4">
+   377→              <button
+   378→                onClick={() => {
+   379→                  setRequires2FA(false);
+   380→                  setPendingToken('');
+   381→                  setTotpCode('');
+   382→                  setTwoFAError('');
+   383→                }}
+   384→                className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+   385→              >
+   386→                Back to login
+   387→              </button>
+   388→            </div>
+   389→          </GlassCard>
+   390→        </motion.div>
+   391→      </div>
+   392→    );
+   393→  }
+   394→
+   395→  return (
+   396→    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 via-white to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-sky-950 p-4 relative overflow-hidden">
+   397→      <BackgroundBlobs />
+   398→
+   399→      <motion.div
+   400→        initial={{ opacity: 0, y: 30 }}
+   401→        animate={{ opacity: 1, y: 0 }}
+   402→        transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
+   403→        className="w-full max-w-md relative z-10"
+   404→      >
+   405→        <GlassCard className="p-6 sm:p-8">
+   406→          {/* Logo */}
+   407→          <motion.div
+   408→            className="flex flex-col items-center mb-8"
+   409→            initial={{ opacity: 0, scale: 0.8 }}
+   410→            animate={{ opacity: 1, scale: 1 }}
+   411→            transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+   412→          >
+   413→            <motion.div
+   414→              className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center mb-3 shadow-lg shadow-sky-500/30"
+   415→              animate={{ rotate: [0, 5, -5, 0] }}
+   416→              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+   417→            >
+   418→              <Image src="/logo.png" alt="DAKKHO" width={40} height={40} className="rounded-xl" />
+   419→            </motion.div>
+   420→            <h1 className="text-2xl font-extrabold gradient-text">DAKKHO</h1>
+   421→            <p className="text-sm text-muted-foreground mt-1">Sign in to continue learning</p>
+   422→          </motion.div>
+   423→
+   424→          {/* Error display */}
+   425→          <AnimatePresence>
+   426→            {error && (
+   427→              <motion.div
+   428→                initial={{ opacity: 0, y: -10, height: 0 }}
+   429→                animate={{ opacity: 1, y: 0, height: 'auto' }}
+   430→                exit={{ opacity: 0, y: -10, height: 0 }}
+   431→                className="mb-4"
+   432→              >
+   433→                <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50">
+   434→                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+   435→                  <p className="text-xs font-medium text-red-600 dark:text-red-400">{error}</p>
+   436→                </div>
+   437→              </motion.div>
+   438→            )}
+   439→          </AnimatePresence>
+   440→
+   441→          {/* Form */}
+   442→          <form onSubmit={handleLogin} className="space-y-5">
+   443→            {/* Email */}
+   444→            <motion.div
+   445→              initial={{ opacity: 0, x: -20 }}
+   446→              animate={{ opacity: 1, x: 0 }}
+   447→              transition={{ delay: 0.3 }}
+   448→            >
+   449→              <label className={`block text-xs font-semibold transition-all duration-200 mb-1.5 ${emailFocused || email ? 'text-sky-500' : 'text-foreground'}`}>
+   450→                Email
+   451→              </label>
+   452→              <div className="relative">
+   453→                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   454→                <input
+   455→                  type="email"
+   456→                  value={email}
+   457→                  onChange={(e) => { setEmail(e.target.value); setError(''); }}
+   458→                  onFocus={() => setEmailFocused(true)}
+   459→                  onBlur={() => setEmailFocused(false)}
+   460→                  placeholder="your@email.com"
+   461→                  className="w-full pl-10 pr-10 py-3 rounded-xl bg-muted/30 border-2 border-transparent focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 outline-none transition-all text-sm"
+   462→                  required
+   463→                />
+   464→                <AnimatePresence>
+   465→                  {emailValid && (
+   466→                    <motion.div
+   467→                      initial={{ scale: 0, opacity: 0 }}
+   468→                      animate={{ scale: 1, opacity: 1 }}
+   469→                      exit={{ scale: 0, opacity: 0 }}
+   470→                      transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+   471→                      className="absolute right-3 top-1/2 -translate-y-1/2"
+   472→                    >
+   473→                      <Check className="w-4 h-4 text-emerald-500" />
+   474→                    </motion.div>
+   475→                  )}
+   476→                </AnimatePresence>
+   477→              </div>
+   478→            </motion.div>
+   479→
+   480→            {/* Password */}
+   481→            <motion.div
+   482→              initial={{ opacity: 0, x: -20 }}
+   483→              animate={{ opacity: 1, x: 0 }}
+   484→              transition={{ delay: 0.4 }}
+   485→            >
+   486→              <label className={`block text-xs font-semibold transition-all duration-200 mb-1.5 ${passwordFocused || password ? 'text-sky-500' : 'text-foreground'}`}>
+   487→                Password
+   488→              </label>
+   489→              <div className="relative">
+   490→                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   491→                <input
+   492→                  type={showPassword ? 'text' : 'password'}
+   493→                  value={password}
+   494→                  onChange={(e) => { setPassword(e.target.value); setError(''); }}
+   495→                  onFocus={() => setPasswordFocused(true)}
+   496→                  onBlur={() => setPasswordFocused(false)}
+   497→                  placeholder="Enter your password"
+   498→                  className="w-full pl-10 pr-10 py-3 rounded-xl bg-muted/30 border-2 border-transparent focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 outline-none transition-all text-sm"
+   499→                  required
+   500→                />
+   501→                <button
+   502→                  type="button"
+   503→                  onClick={() => setShowPassword(!showPassword)}
+   504→                  className="absolute right-3 top-1/2 -translate-y-1/2 hover:text-foreground transition-colors"
+   505→                >
+   506→                  {showPassword ? (
+   507→                    <EyeOff className="w-4 h-4 text-muted-foreground" />
+   508→                  ) : (
+   509→                    <Eye className="w-4 h-4 text-muted-foreground" />
+   510→                  )}
+   511→                </button>
+   512→              </div>
+   513→              {/* Password strength hint */}
+   514→              <AnimatePresence>
+   515→                {password && (
+   516→                  <motion.div
+   517→                    initial={{ opacity: 0, height: 0 }}
+   518→                    animate={{ opacity: 1, height: 'auto' }}
+   519→                    exit={{ opacity: 0, height: 0 }}
+   520→                    className="mt-1.5"
+   521→                  >
+   522→                    <p className="text-xs" style={{ color: passwordStrength.color }}>
+   523→                      Password strength: {passwordStrength.label}
+   524→                    </p>
+   525→                  </motion.div>
+   526→                )}
+   527→              </AnimatePresence>
+   528→            </motion.div>
+   529→
+   530→            {/* Remember me & Forgot password */}
+   531→            <motion.div
+   532→              className="flex items-center justify-between"
+   533→              initial={{ opacity: 0 }}
+   534→              animate={{ opacity: 1 }}
+   535→              transition={{ delay: 0.5 }}
+   536→            >
+   537→              <label className="flex items-center gap-2 cursor-pointer group">
+   538→                <div className="relative">
+   539→                  <input
+   540→                    type="checkbox"
+   541→                    checked={rememberMe}
+   542→                    onChange={(e) => setRememberMe(e.target.checked)}
+   543→                    className="sr-only peer"
+   544→                  />
+   545→                  <div className="w-4 h-4 rounded border-2 border-muted-foreground/40 peer-checked:border-sky-500 peer-checked:bg-sky-500 transition-all duration-200 flex items-center justify-center">
+   546→                    <AnimatePresence>
+   547→                      {rememberMe && (
+   548→                        <motion.div
+   549→                          initial={{ scale: 0 }}
+   550→                          animate={{ scale: 1 }}
+   551→                          exit={{ scale: 0 }}
+   552→                          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+   553→                        >
+   554→                          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+   555→                        </motion.div>
+   556→                      )}
+   557→                    </AnimatePresence>
+   558→                  </div>
+   559→                </div>
+   560→                <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">Remember me</span>
+   561→              </label>
+   562→              <button
+   563→                type="button"
+   564→                onClick={() => navigate('forgot-password')}
+   565→                className="text-xs font-semibold text-sky-500 hover:text-sky-600 transition-colors"
+   566→              >
+   567→                Forgot Password?
+   568→              </button>
+   569→            </motion.div>
+   570→
+   571→            {/* Submit */}
+   572→            <motion.div
+   573→              initial={{ opacity: 0, y: 10 }}
+   574→              animate={{ opacity: 1, y: 0 }}
+   575→              transition={{ delay: 0.6 }}
+   576→            >
+   577→              <GradientButton type="submit" loading={isLoading} className="w-full" size="lg">
+   578→                {isLoading ? (
+   579→                  <>
+   580→                    <motion.div
+   581→                      animate={{ rotate: 360 }}
+   582→                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+   583→                      className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+   584→                    />
+   585→                    Signing in...
+   586→                  </>
+   587→                ) : (
+   588→                  <>
+   589→                    <LogIn className="w-4 h-4" />
+   590→                    Sign In
+   591→                  </>
+   592→                )}
+   593→              </GradientButton>
+   594→            </motion.div>
+   595→
+   596→            {/* Sign in with OTP */}
+   597→            <motion.div
+   598→              initial={{ opacity: 0 }}
+   599→              animate={{ opacity: 1 }}
+   600→              transition={{ delay: 0.65 }}
+   601→            >
+   602→              <button
+   603→                type="button"
+   604→                onClick={handleOTPLogin}
+   605→                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-muted-foreground/20 text-sm text-muted-foreground hover:border-sky-400/50 hover:text-sky-500 transition-all duration-200"
+   606→              >
+   607→                <KeyRound className="w-4 h-4" />
+   608→                Sign in with OTP
+   609→              </button>
+   610→            </motion.div>
+   611→          </form>
+   612→
+   613→          {/* Divider */}
+   614→          <motion.div
+   615→            className="relative my-6"
+   616→            initial={{ opacity: 0 }}
+   617→            animate={{ opacity: 1 }}
+   618→            transition={{ delay: 0.7 }}
+   619→          >
+   620→            <div className="absolute inset-0 flex items-center">
+   621→              <div className="w-full border-t border-muted-foreground/20" />
+   622→            </div>
+   623→            <div className="relative flex justify-center text-xs">
+   624→              <span className="px-3 bg-white/70 dark:bg-slate-900/70 text-muted-foreground font-medium">or continue with</span>
+   625→            </div>
+   626→          </motion.div>
+   627→
+   628→          {/* Social login buttons */}
+   629→          <motion.div
+   630→            className="grid grid-cols-2 gap-3"
+   631→            initial={{ opacity: 0 }}
+   632→            animate={{ opacity: 1 }}
+   633→            transition={{ delay: 0.75 }}
+   634→          >
+   635→            <motion.button
+   636→              type="button"
+   637→              onClick={() => handleSocialLogin('Google')}
+   638→              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-muted/30 border border-transparent hover:border-sky-400/30 hover:bg-muted/50 transition-all duration-200"
+   639→              whileHover={{ scale: 1.02 }}
+   640→              whileTap={{ scale: 0.98 }}
+   641→            >
+   642→              <svg className="w-5 h-5" viewBox="0 0 24 24">
+   643→                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+   644→                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+   645→                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+   646→                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+   647→              </svg>
+   648→              <span className="text-sm font-semibold text-foreground">Google</span>
+   649→            </motion.button>
+   650→            <motion.button
+   651→              type="button"
+   652→              onClick={() => handleSocialLogin('GitHub')}
+   653→              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-muted/30 border border-transparent hover:border-sky-400/30 hover:bg-muted/50 transition-all duration-200"
+   654→              whileHover={{ scale: 1.02 }}
+   655→              whileTap={{ scale: 0.98 }}
+   656→            >
+   657→              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+   658→                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+   659→              </svg>
+   660→              <span className="text-sm font-semibold text-foreground">GitHub</span>
+   661→            </motion.button>
+   662→          </motion.div>
+   663→
+   664→          {/* Sign up link */}
+   665→          <motion.div
+   666→            className="text-center mt-6"
+   667→            initial={{ opacity: 0 }}
+   668→            animate={{ opacity: 1 }}
+   669→            transition={{ delay: 0.8 }}
+   670→          >
+   671→            <p className="text-sm text-muted-foreground">
+   672→              Don&apos;t have an account?{' '}
+   673→              <button
+   674→                onClick={() => navigate('signup')}
+   675→                className="font-bold text-sky-500 hover:text-sky-600 transition-colors"
+   676→              >
+   677→                Sign Up
+   678→              </button>
+   679→            </p>
+   680→          </motion.div>
+   681→        </GlassCard>
+   682→      </motion.div>
+   683→    </div>
+   684→  );
+   685→}
+   686→

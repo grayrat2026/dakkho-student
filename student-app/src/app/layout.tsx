@@ -50,6 +50,7 @@ export default function RootLayout({
         <link
           href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap"
           rel="stylesheet"
+          as="style"
         />
         {/* OneSignal Push Notifications */}
         <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
