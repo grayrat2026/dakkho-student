@@ -40,12 +40,21 @@ DAKKHO Student App is the learner-facing single-page application for the DAKKHO 
 - **Course Browsing** — Browse all available courses with filtering and search
 - **Course Detail Pages** — Rich course pages with curriculum overview, instructor info, and enrollment options
 - **Featured Instructors** — Discover and explore top instructors on the platform
+- **Trending Courses** — Horizontal scrollable trending courses with poster-style cards
+- **Poster-style Course Cards** — Portrait aspect ratio cards for better thumbnail display
 
 ### 📚 Learning Experience
 - **Video Streaming** — Stream course videos directly in the app with progress tracking
 - **My Courses** — Access all enrolled courses from a unified dashboard
 - **Watch History** — Track viewing history and resume where you left off
 - **Curriculum Navigation** — Browse chapters, lessons, and learning points
+- **Exam Tips** — Study strategies, time management, common mistakes, and wellness tips (admin-editable)
+
+### 🎨 UI/UX
+- **Custom Cursors** — SVG-based custom cursors for light and dark modes
+- **Dark/Light Mode** — Full theme support with custom accent colors
+- **Glassmorphism Design** — Modern glass-effect cards with backdrop blur
+- **Smooth Animations** — Framer Motion page transitions and micro-interactions
 
 ### 🔐 Authentication
 - **Email OTP Login** — Passwordless authentication via one-time email codes
