@@ -213,6 +213,11 @@ export function ProfilePage() {
                     {TECHNOLOGY_SHORT_NAMES[user.technology] || user.technology}
                   </span>
                 )}
+                {user.semester && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400 font-semibold">
+                    Sem {user.semester}
+                  </span>
+                )}
               </div>
             </div>
             <motion.button

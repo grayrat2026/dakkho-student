@@ -7,7 +7,7 @@ import {
   Save, X, CheckCircle, AlertCircle, ChevronLeft, Eye, EyeOff,
   Upload, Shield, GraduationCap, Loader2,
 } from 'lucide-react';
-import { useNavigationStore, useAuthStore } from '@/lib/store';
+import { useNavigationStore, useAuthStore, type User as UserType } from '@/lib/store';
 import { instituteApi, technologyApi, studentProfileApi, type Institute, type Technology } from '@/lib/api-client';
 import { GlassCard } from '../shared/GlassCard';
 import { AnimatedPage } from '../shared/AnimatedPage';
@@ -27,7 +27,7 @@ export function EditProfilePage() {
   const [apiTechnologies, setApiTechnologies] = useState<Technology[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [bio, setBio] = useState('');
-  const [semester, setSemester] = useState('');
+  const [semester, setSemester] = useState(user?.semester ? String(user.semester) : '');
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -56,10 +56,22 @@ export function EditProfilePage() {
           if (profileRes.profile.phone) setPhone(profileRes.profile.phone);
           if (profileRes.profile.bio) setBio(profileRes.profile.bio);
           if (profileRes.profile.semester) setSemester(profileRes.profile.semester);
-          // Update avatarUrl in store if available
+          // Pre-fill instituteId & technology from API if not in store
+          if (profileRes.profile.instituteId && !instituteId) {
+            setInstituteId(String(profileRes.profile.instituteId));
+          }
+          if (profileRes.profile.technology && !technology) {
+            setTechnology(profileRes.profile.technology);
+          }
+          // Update avatarUrl & semester in store if available
           const currentUser = userRef.current;
-          if (profileRes.profile.avatarUrl && currentUser && !currentUser.avatarUrl) {
-            setUser({ ...currentUser, avatarUrl: profileRes.profile.avatarUrl });
+          if (currentUser) {
+            const updates: Partial<UserType> = {};
+            if (profileRes.profile.avatarUrl && !currentUser.avatarUrl) updates.avatarUrl = profileRes.profile.avatarUrl;
+            if (profileRes.profile.semester && !currentUser.semester) updates.semester = Number(profileRes.profile.semester);
+            if (Object.keys(updates).length > 0) {
+              setUser({ ...currentUser, ...updates });
+            }
           }
         }
       } catch (err) {
@@ -107,6 +119,7 @@ export function EditProfilePage() {
           institute: selectedInstitute?.name || user.institute,
           instituteId: instituteId ? Number(instituteId) : user.instituteId,
           technology,
+          semester: semester ? Number(semester) : undefined,
         });
       }
       setSaved(true);
