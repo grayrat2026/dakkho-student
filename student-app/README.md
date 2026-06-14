@@ -36,6 +36,7 @@ DAKKHO Student App is a mobile-first SPA built with Next.js 16 (static export) t
 - **Animations**: Framer Motion
 - **API Client**: Custom fetch wrapper with interceptors
 - **Auth**: Bearer token (student_sessions) with email OTP verification
+- **2FA**: TOTP-based two-factor authentication (Google Authenticator, Authy, etc.)
 
 ## 📱 Key Features
 
@@ -63,6 +64,15 @@ DAKKHO Student App is a mobile-first SPA built with Next.js 16 (static export) t
 - AI-powered search across courses, instructors, and videos
 - Achievement system with unlockable badges
 - Certificate generation for completed courses
+
+### Security & Account
+- **Two-Factor Authentication (2FA)**: TOTP-based 2FA with authenticator app support (Google Authenticator, Authy)
+- QR code enrollment flow with backup codes generation
+- 2FA verification during login for enabled accounts
+- **Active Sessions Management**: View all logged-in devices, revoke individual sessions or all at once
+- Device info and IP tracking per session
+- **Account Deletion**: Multi-step flow with password verification, reason survey, and confirmation
+- Change password with current password verification
 
 ### Support
 - Support ticket system with real-time messaging
